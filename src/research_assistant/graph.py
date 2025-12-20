@@ -1,8 +1,11 @@
 """
-LangGraph workflow definition for the Research Assistant.
+graph.py - The main workflow
 
-This module defines the complete multi-agent workflow using LangGraph,
-including nodes, edges, conditional routing, and human-in-the-loop support.
+This wires up all 4 agents using LangGraph's StateGraph. Each agent becomes
+a node, and we connect them with edges. The routing functions decide where
+to go based on what each agent returns.
+
+Author: Rajesh Gupta
 """
 
 import logging
@@ -25,58 +28,50 @@ from .routing.conditions import (
 logger = logging.getLogger(__name__)
 
 
-# Define state schema as TypedDict for LangGraph compatibility
 def add_messages(left: List, right: List) -> List:
-    """Reducer to append messages."""
+    """Just appends new messages to the list"""
     return left + right
 
 
 class GraphState(TypedDict, total=False):
-    """State schema for the LangGraph workflow."""
-    # User Input
+    """
+    Shared state that gets passed between agents.
+    Each agent reads what it needs and adds its outputs.
+    """
+    # What the user asked
     user_query: str
     messages: Annotated[List, add_messages]
 
-    # Clarity Agent Outputs
+    # From Clarity Agent
     clarity_status: str
     clarification_request: str
     detected_company: str
 
-    # Research Agent Outputs
+    # From Research Agent
     research_findings: Any
     confidence_score: float
 
-    # Validator Agent Outputs
+    # From Validator
     validation_result: str
     validation_feedback: str
 
-    # Loop Control
+    # Tracking retries
     research_attempts: int
 
-    # Synthesis Output
+    # Final output
     final_response: str
 
-    # Workflow Control
+    # Misc
     current_agent: str
     error_message: str
-
-    # Human-in-the-Loop
     awaiting_human_input: bool
     human_response: str
 
 
 def human_clarification_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Human-in-the-loop interrupt node.
-
-    This node pauses the workflow execution and waits for human input
-    when the Clarity Agent determines the query needs clarification.
-
-    Args:
-        state: Current workflow state
-
-    Returns:
-        State updates with human clarification
+    Pauses and asks the user for clarification.
+    Uses LangGraph's interrupt() to halt execution until we get input.
     """
     logger.info("Entering human clarification node")
 
@@ -107,58 +102,34 @@ def human_clarification_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_research_graph(checkpointer=None) -> StateGraph:
     """
-    Construct the LangGraph workflow for the Research Assistant.
+    Builds and returns the compiled graph.
 
-    The workflow implements:
-    - 4 specialized agents (Clarity, Research, Validator, Synthesis)
-    - Conditional routing based on agent outputs
-    - Human-in-the-loop for unclear queries
-    - Feedback loop for research retry (max 3 attempts)
-
-    Graph Flow:
-    ```
-    START -> clarity
-             |
-             ├─[needs_clarification]─> human_clarification -> clarity
-             └─[clear]─> research
-                         |
-                         ├─[confidence < 6]─> validator
-                         │                     |
-                         │   ├─[insufficient & attempts < 3]─> research
-                         │   └─[sufficient OR max attempts]─> synthesis
-                         └─[confidence >= 6]─> synthesis -> END
-    ```
-
-    Args:
-        checkpointer: Optional checkpointer for state persistence.
-                     Defaults to MemorySaver if not provided.
-
-    Returns:
-        Compiled StateGraph ready for execution
+    This is where we connect all the pieces:
+    - Add each agent as a node
+    - Wire up the edges between them
+    - Set up the conditional routing
     """
     logger.info("Building research assistant graph")
 
-    # Initialize agents
+    # Create our agents
     clarity_agent = ClarityAgent()
     research_agent = ResearchAgent()
     validator_agent = ValidatorAgent()
     synthesis_agent = SynthesisAgent()
 
-    # Create StateGraph with our state schema
     workflow = StateGraph(GraphState)
 
-    # === Add Nodes ===
+    # Add all nodes
     workflow.add_node("clarity", clarity_agent.run)
     workflow.add_node("human_clarification", human_clarification_node)
     workflow.add_node("research", research_agent.run)
     workflow.add_node("validator", validator_agent.run)
     workflow.add_node("synthesis", synthesis_agent.run)
 
-    # === Add Entry Edge ===
+    # Start with clarity
     workflow.add_edge(START, "clarity")
 
-    # === Conditional Edge: After Clarity ===
-    # Routes to human_clarification if query is unclear, else to research
+    # After clarity: either ask for clarification or proceed to research
     workflow.add_conditional_edges(
         "clarity",
         route_after_clarity,
@@ -168,12 +139,10 @@ def build_research_graph(checkpointer=None) -> StateGraph:
         }
     )
 
-    # === Edge: After Human Clarification ===
-    # Returns to clarity agent to re-evaluate the clarified query
+    # After getting clarification, go back to clarity to re-evaluate
     workflow.add_edge("human_clarification", "clarity")
 
-    # === Conditional Edge: After Research ===
-    # Routes to validator if low confidence, else directly to synthesis
+    # After research: validate if low confidence, otherwise synthesize
     workflow.add_conditional_edges(
         "research",
         route_after_research,
@@ -183,38 +152,30 @@ def build_research_graph(checkpointer=None) -> StateGraph:
         }
     )
 
-    # === Conditional Edge: After Validation ===
-    # Routes back to research if insufficient (retry loop), else to synthesis
+    # After validation: retry research if needed, otherwise synthesize
     workflow.add_conditional_edges(
         "validator",
         route_after_validation,
         {
-            "research": "research",  # Retry loop
+            "research": "research",
             "synthesis": "synthesis"
         }
     )
 
-    # === Terminal Edge ===
+    # Synthesis is the end
     workflow.add_edge("synthesis", END)
 
-    # Use provided checkpointer or create default
+    # Use in-memory checkpointer by default
     if checkpointer is None:
         checkpointer = MemorySaver()
 
-    # Compile the graph with checkpointer for persistence
     graph = workflow.compile(checkpointer=checkpointer)
-
-    logger.info("Research assistant graph built successfully")
+    logger.info("Graph built successfully")
     return graph
 
 
 def get_graph_visualization() -> str:
-    """
-    Generate a Mermaid diagram of the workflow.
-
-    Returns:
-        Mermaid diagram string for visualization
-    """
+    """Returns a mermaid diagram of the workflow for docs"""
     return """
 ```mermaid
 graph TD

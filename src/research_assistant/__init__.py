@@ -1,12 +1,15 @@
 """
-LangGraph Multi-Agent Research Assistant
+Research Assistant - Multi-Agent System
 
-A production-grade multi-agent system for company research using LangGraph.
-Features 4 specialized agents: Clarity, Research, Validator, and Synthesis.
+Built this to explore LangGraph's capabilities for building agent workflows.
+The idea is simple: instead of one big agent trying to do everything, we have
+4 smaller agents that each do one thing well and pass work to each other.
+
+Author: Rajesh Gupta
 """
 
 __version__ = "1.0.0"
-__author__ = "Research Assistant Team"
+__author__ = "Rajesh Gupta"
 
 from .app import ResearchAssistantApp
 from .state import ResearchAssistantState

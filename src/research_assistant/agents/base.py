@@ -1,8 +1,10 @@
 """
-Base agent class for the Research Assistant.
+base.py - Parent class for all agents
 
-Provides common functionality for all specialized agents including
-LLM interaction, logging, and state management.
+Handles the boring stuff every agent needs: LLM setup, JSON parsing, etc.
+Each specific agent just implements run() and its prompts.
+
+Author: Rajesh Gupta
 """
 
 import json
@@ -18,25 +20,11 @@ from ..config import settings
 
 class BaseAgent(ABC):
     """
-    Abstract base class for all agents in the Research Assistant.
-
-    Provides common functionality for LLM interaction, logging,
-    and state management. All specialized agents should inherit
-    from this class.
+    Parent class for our agents. Handles LLM setup, logging, JSON parsing.
+    Subclasses just need to define their name, system_prompt, and run().
     """
 
-    def __init__(
-        self,
-        model_name: Optional[str] = None,
-        temperature: Optional[float] = None
-    ):
-        """
-        Initialize the base agent.
-
-        Args:
-            model_name: LLM model to use (defaults to settings.default_model)
-            temperature: Temperature for LLM responses (defaults to settings.temperature)
-        """
+    def __init__(self, model_name: Optional[str] = None, temperature: Optional[float] = None):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.model_name = model_name or settings.default_model
         self.temperature = temperature if temperature is not None else settings.temperature
@@ -44,57 +32,38 @@ class BaseAgent(ABC):
 
     @property
     def llm(self) -> ChatAnthropic:
-        """Lazy-loaded LLM instance."""
+        """Creates the LLM client on first use"""
         if self._llm is None:
             if not settings.validate_api_key():
-                raise ValueError(
-                    "ANTHROPIC_API_KEY not configured. "
-                    "Please set it in .env file or environment variables."
-                )
+                raise ValueError("ANTHROPIC_API_KEY not set - check your .env file")
             self._llm = ChatAnthropic(
                 model=self.model_name,
                 temperature=self.temperature,
                 api_key=settings.anthropic_api_key,
                 max_tokens=4096,
             )
-            self.logger.debug(f"Initialized LLM: {self.model_name}")
+            self.logger.debug(f"Using model: {self.model_name}")
         return self._llm
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Return the name of this agent."""
+        """Agent name for logging"""
         pass
 
     @property
     @abstractmethod
     def system_prompt(self) -> str:
-        """Return the system prompt for this agent."""
+        """The system prompt that defines this agent's personality"""
         pass
 
     @abstractmethod
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute the agent's logic.
-
-        Args:
-            state: Current workflow state as dictionary
-
-        Returns:
-            Dictionary of state updates
-        """
+        """Main logic - takes state, returns updates to state"""
         pass
 
     def _create_prompt(self, human_template: str) -> ChatPromptTemplate:
-        """
-        Create a chat prompt template with system and human messages.
-
-        Args:
-            human_template: Template string for the human message
-
-        Returns:
-            ChatPromptTemplate instance
-        """
+        """Builds a prompt from system + human message templates"""
         return ChatPromptTemplate.from_messages([
             ("system", self.system_prompt),
             ("human", human_template)
@@ -102,16 +71,11 @@ class BaseAgent(ABC):
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
         """
-        Parse JSON response from LLM, handling markdown code blocks.
-
-        Args:
-            content: Raw response content from LLM
-
-        Returns:
-            Parsed JSON as dictionary
+        Extracts JSON from LLM response. Handles the annoying case where
+        the LLM wraps it in markdown code blocks.
         """
         try:
-            # Handle markdown code blocks
+            # Strip markdown code blocks if present
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0]
             elif "```" in content:
@@ -119,42 +83,19 @@ class BaseAgent(ABC):
 
             return json.loads(content.strip())
         except json.JSONDecodeError as e:
-            self.logger.warning(f"Failed to parse JSON response: {e}")
-            self.logger.debug(f"Raw content: {content}")
+            self.logger.warning(f"JSON parse failed: {e}")
+            self.logger.debug(f"Raw: {content}")
             return {}
 
-    def _log_execution(
-        self,
-        action: str,
-        details: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """
-        Log agent execution details.
-
-        Args:
-            action: Description of the action being performed
-            details: Additional details to log
-        """
+    def _log_execution(self, action: str, details: Optional[Dict[str, Any]] = None) -> None:
+        """Simple helper for consistent logging"""
         msg = f"{self.name} - {action}"
         if details:
             msg += f" | {details}"
         self.logger.info(msg)
 
-    def _build_context_from_messages(
-        self,
-        messages: list,
-        max_messages: int = 10
-    ) -> str:
-        """
-        Build context string from message history.
-
-        Args:
-            messages: List of Message objects or dicts
-            max_messages: Maximum number of recent messages to include
-
-        Returns:
-            Formatted context string
-        """
+    def _build_context_from_messages(self, messages: list, max_messages: int = 10) -> str:
+        """Formats recent messages into a string for context"""
         if not messages:
             return "No previous conversation."
 
