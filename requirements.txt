@@ -1,0 +1,25 @@
+# LangGraph Multi-Agent Research Assistant Dependencies
+
+# Core LangGraph and LangChain
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-core>=0.3.0
+
+# Data Validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Environment Management
+python-dotenv>=1.0.0
+
+# Search Tool (Tavily - preferred as per requirements)
+tavily-python>=0.3.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+# Optional: For production persistence
+# langgraph-checkpoint-sqlite>=1.0.0
+# langgraph-checkpoint-postgres>=1.0.0
