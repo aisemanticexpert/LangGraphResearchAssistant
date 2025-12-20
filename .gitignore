@@ -84,7 +84,16 @@ dmypy.json
 output/
 *.db
 checkpoints.db
+
+# Logs directory (keep structure, ignore contents)
+logs/
 *.log
+
+# Exports directory (keep structure, ignore contents)
+exports/
+
+# Data directory (keep structure, ignore contents)
+data/
 
 # macOS
 .DS_Store

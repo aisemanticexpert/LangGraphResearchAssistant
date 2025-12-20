@@ -9,11 +9,11 @@ import logging
 import uuid
 from typing import Any, Dict, Optional
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
 from .graph import build_research_graph
 from .state import Message
+from .utils.persistence import get_checkpointer
 
 
 logger = logging.getLogger(__name__)
@@ -36,9 +36,9 @@ class ResearchAssistantApp:
 
         Args:
             checkpointer: Optional checkpointer for state persistence.
-                         Defaults to MemorySaver for in-memory persistence.
+                         Uses configured backend (memory/sqlite/postgres) by default.
         """
-        self.checkpointer = checkpointer or MemorySaver()
+        self.checkpointer = checkpointer or get_checkpointer()
         self.graph = build_research_graph(checkpointer=self.checkpointer)
         self._thread_counter = 0
         logger.info("ResearchAssistantApp initialized")

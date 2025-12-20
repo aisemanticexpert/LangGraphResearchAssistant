@@ -30,6 +30,9 @@ Examples:
   # Single query mode
   python -m src.research_assistant.main -q "Tell me about Apple's latest products"
 
+  # Start REST API server
+  python -m src.research_assistant.main --api
+
   # Verbose logging
   python -m src.research_assistant.main -v
 
@@ -37,6 +40,7 @@ Environment Variables:
   ANTHROPIC_API_KEY    Required. Your Anthropic API key.
   USE_MOCK_DATA        Use mock data (default: true)
   LOG_LEVEL            Logging level (default: INFO)
+  CHECKPOINT_BACKEND   Persistence backend: memory, sqlite (default: memory)
 """
     )
 
@@ -50,6 +54,19 @@ Environment Variables:
         "-i", "--interactive",
         action="store_true",
         help="Run in interactive conversation mode (default if no query provided)"
+    )
+
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Start the REST API server"
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for API server (default: 8000)"
     )
 
     parser.add_argument(
@@ -84,13 +101,17 @@ def print_help_commands():
     print("""
 Commands:
   - Type your question to get company research
-  - 'new'  : Start a fresh conversation
-  - 'state': Show current conversation state
-  - 'help' : Show this help message
+  - 'new'     : Start a fresh conversation
+  - 'state'   : Show current conversation state
+  - 'export'  : Export conversation to JSON/Markdown
+  - 'cache'   : Show cache statistics
+  - 'companies': List available companies
+  - 'help'    : Show this help message
   - 'quit' or 'exit': End the session
 
 Tips:
-  - Ask about companies like Apple, Tesla, Microsoft, Google, Amazon
+  - Ask about 25+ companies including Apple, Tesla, Microsoft, Google, Amazon,
+    NVIDIA, AMD, Salesforce, Pfizer, Walmart, Disney, and more!
   - Follow-up questions maintain context (e.g., "What about their competitors?")
   - The assistant will ask for clarification if your query is unclear
 """)
@@ -98,6 +119,10 @@ Tips:
 
 def run_interactive_mode(app: ResearchAssistantApp):
     """Run the assistant in interactive conversation mode."""
+    from .utils.cache import query_cache
+    from .utils.export import exporter
+    from .tools.mock_data import list_available_companies
+
     print_banner()
     print_help_commands()
 
@@ -125,6 +150,37 @@ def run_interactive_mode(app: ResearchAssistantApp):
                 print_help_commands()
                 continue
 
+            if user_input.lower() == "companies":
+                companies = list_available_companies()
+                print(f"\n📋 Available Companies ({len(companies)} total):")
+                for i, company in enumerate(companies, 1):
+                    print(f"   {i:2}. {company}")
+                continue
+
+            if user_input.lower() == "cache":
+                stats = query_cache.get_stats()
+                print(f"\n📊 Cache Statistics:")
+                print(f"   Enabled: {stats['enabled']}")
+                print(f"   Entries: {stats['valid_entries']}/{stats['max_size']}")
+                print(f"   TTL: {stats['ttl_seconds']}s")
+                continue
+
+            if user_input.lower() == "export":
+                if current_thread_id:
+                    state = app.get_conversation_state(current_thread_id)
+                    if state:
+                        messages = state.get("messages", [])
+                        json_path = exporter.export_to_json(current_thread_id, state, messages)
+                        md_path = exporter.export_to_markdown(current_thread_id, state, messages)
+                        print(f"\n📁 Exported conversation:")
+                        print(f"   JSON: {json_path}")
+                        print(f"   Markdown: {md_path}")
+                    else:
+                        print("   No state to export")
+                else:
+                    print("\n📁 No active conversation to export")
+                continue
+
             if user_input.lower() == "state":
                 if current_thread_id:
                     state = app.get_conversation_state(current_thread_id)
@@ -133,6 +189,7 @@ def run_interactive_mode(app: ResearchAssistantApp):
                         print(f"   Thread: {current_thread_id}")
                         print(f"   Company: {state.get('detected_company', 'N/A')}")
                         print(f"   Clarity: {state.get('clarity_status', 'N/A')}")
+                        print(f"   Confidence: {state.get('confidence_score', 0.0)}/10")
                         print(f"   Attempts: {state.get('research_attempts', 0)}/3")
                     else:
                         print("   No state available")
@@ -252,6 +309,23 @@ def validate_environment():
         sys.exit(1)
 
 
+def run_api_server(port: int):
+    """Start the FastAPI REST API server."""
+    import uvicorn
+    from .config import settings
+
+    print(f"\n🚀 Starting Research Assistant API server on port {port}...")
+    print(f"   Docs: http://localhost:{port}/docs")
+    print(f"   ReDoc: http://localhost:{port}/redoc\n")
+
+    uvicorn.run(
+        "src.research_assistant.api:app",
+        host=settings.api_host,
+        port=port,
+        reload=False,
+    )
+
+
 def main():
     """Main entry point for the Research Assistant CLI."""
     parser = setup_cli()
@@ -261,7 +335,13 @@ def main():
     log_level = logging.DEBUG if args.verbose else logging.INFO
     setup_logging(log_level)
 
-    # Validate environment
+    # Run API server mode
+    if args.api:
+        validate_environment()
+        run_api_server(args.port)
+        return
+
+    # Validate environment for other modes
     validate_environment()
 
     # Initialize application

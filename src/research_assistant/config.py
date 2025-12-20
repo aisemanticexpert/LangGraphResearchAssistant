@@ -38,11 +38,31 @@ class Settings(BaseSettings):
 
     # Persistence Settings
     checkpoint_backend: str = "memory"  # memory, sqlite, postgres
-    sqlite_path: str = "checkpoints.db"
+    sqlite_path: str = "data/checkpoints.db"
     postgres_url: Optional[str] = None
 
-    # Logging
+    # Caching Settings
+    enable_cache: bool = True
+    cache_ttl_seconds: int = 3600  # 1 hour default
+    cache_max_size: int = 100  # Max number of cached queries
+
+    # Logging Settings
     log_level: str = "INFO"
+    log_to_file: bool = True
+    log_file_path: str = "logs/research_assistant.log"
+    log_max_bytes: int = 10485760  # 10MB
+    log_backup_count: int = 5
+
+    # Streaming Settings
+    enable_streaming: bool = True
+
+    # Export Settings
+    export_dir: str = "exports"
+
+    # API Server Settings (for FastAPI)
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+    api_workers: int = 4
 
     def validate_api_key(self) -> bool:
         """Check if Anthropic API key is configured."""
