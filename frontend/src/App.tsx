@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './index.css';
 import researchApi from './services/api';
-import { Message, Conversation, CacheStats, InterruptInfo } from './types';
+import { Message, Conversation, CacheStats, InterruptInfo, QueryResponse } from './types';
 import Sidebar from './components/Sidebar';
 import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
@@ -136,7 +136,7 @@ function App() {
     setCurrentConversation(updatedConversation);
 
     try {
-      let response;
+      let response: QueryResponse;
 
       if (currentConversation?.threadId) {
         // Continue existing conversation

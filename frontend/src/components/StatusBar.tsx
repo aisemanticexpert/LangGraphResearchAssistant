@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle, XCircle, AlertCircle, Database, Clock, Building2 } from 'lucide-react';
+import { CheckCircle, XCircle, Database, Clock, Building2 } from 'lucide-react';
 
 interface StatusBarProps {
   isConnected: boolean;
