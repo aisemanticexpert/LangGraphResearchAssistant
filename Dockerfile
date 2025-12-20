@@ -22,6 +22,11 @@ FROM python:3.11-slim as production
 
 WORKDIR /app
 
+# Install curl for health checks
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy installed packages from builder
 COPY --from=builder /root/.local /root/.local
 
@@ -37,16 +42,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY src/ ./src/
 COPY pyproject.toml .
 
-# Create directories for input/output
-RUN mkdir -p /app/input /app/output
-
-# Create non-root user for security (optional, comment out for dev)
-# RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-# USER appuser
+# Create directories for data, logs, exports
+RUN mkdir -p /app/data /app/logs /app/exports /app/input /app/output
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "from src.research_assistant.config import settings; print('OK')" || exit 1
+
+# Expose API port
+EXPOSE 8000
 
 # Default command - interactive mode
 CMD ["python", "-m", "src.research_assistant.main"]
