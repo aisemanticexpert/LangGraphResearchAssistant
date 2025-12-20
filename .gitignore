@@ -88,3 +88,6 @@ checkpoints.db
 
 # macOS
 .DS_Store
+
+# Local documentation
+LANGGRAPH_GUIDE.md
