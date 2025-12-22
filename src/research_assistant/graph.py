@@ -1,15 +1,17 @@
 """
-graph.py - The main workflow
+The main workflow - where all the agents get wired together.
 
-This wires up all 4 agents using LangGraph's StateGraph. Each agent becomes
-a node, and we connect them with edges. The routing functions decide where
-to go based on what each agent returns.
+Uses LangGraph's StateGraph to connect the 4 agents. Each agent
+is a node, routing functions decide where to go next based on
+what each agent returns.
 
-Author: Rajesh Gupta
+Also has error handling so we don't just crash if something breaks.
 """
 
 import logging
-from typing import Any, Dict, TypedDict, Annotated, List
+import traceback
+from typing import Any, Dict, TypedDict, Annotated, List, Literal
+from functools import wraps
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -24,6 +26,7 @@ from .routing.conditions import (
     route_after_research,
     route_after_validation,
 )
+from .state import Message
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,7 @@ class GraphState(TypedDict, total=False):
     # From Research Agent
     research_findings: Any
     confidence_score: float
+    confidence_breakdown: Dict[str, Any]  # Detailed confidence metrics
 
     # From Validator
     validation_result: str
@@ -66,6 +70,14 @@ class GraphState(TypedDict, total=False):
     error_message: str
     awaiting_human_input: bool
     human_response: str
+
+    # Error handling
+    has_error: bool
+    error_node: str
+    error_recoverable: bool
+
+    # Retry effectiveness tracking
+    retry_history: List[Dict[str, Any]]
 
 
 def human_clarification_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -100,7 +112,108 @@ def human_clarification_node(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_research_graph(checkpointer=None) -> StateGraph:
+def error_handler_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handles errors that occur during agent execution.
+
+    Provides graceful degradation by:
+    1. Logging the error with full context
+    2. Generating a user-friendly error message
+    3. Attempting recovery if possible
+    4. Routing to synthesis with available data if unrecoverable
+    """
+    error_message = state.get("error_message", "Unknown error occurred")
+    error_node = state.get("error_node", "unknown")
+    current_attempts = state.get("research_attempts", 0)
+
+    logger.error(f"Error in node '{error_node}': {error_message}")
+
+    # Determine if we can recover
+    recoverable = False
+    recovery_action = None
+
+    if error_node == "research" and current_attempts < 3:
+        # Can retry research
+        recoverable = True
+        recovery_action = "Retrying research with adjusted parameters"
+        logger.info(f"Attempting recovery: {recovery_action}")
+
+    elif error_node == "clarity":
+        # Ask user for help
+        recoverable = True
+        recovery_action = "Asking user for clarification due to processing error"
+
+    elif error_node == "validator":
+        # Skip validation and proceed to synthesis
+        recoverable = True
+        recovery_action = "Skipping validation and proceeding with available data"
+
+    # Build error response
+    if recoverable:
+        user_message = f"I encountered an issue while processing your request, but I'm attempting to recover. {recovery_action}"
+    else:
+        user_message = (
+            f"I encountered an error while researching your query. "
+            f"I'll provide the best response possible with the information gathered so far."
+        )
+
+    return {
+        "has_error": True,
+        "error_recoverable": recoverable,
+        "current_agent": "ErrorHandler",
+        "messages": [Message(
+            role="assistant",
+            content=f"[System] {user_message}",
+            agent="ErrorHandler"
+        )],
+        # If not recoverable, set validation as sufficient to proceed to synthesis
+        "validation_result": "sufficient" if not recoverable else state.get("validation_result", "pending"),
+    }
+
+
+def create_safe_node(node_name: str, node_func):
+    """
+    Wraps a node function with error handling.
+
+    Catches exceptions and routes to error handler instead of crashing.
+    """
+    @wraps(node_func)
+    def safe_node(state: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return node_func(state)
+        except Exception as e:
+            logger.error(f"Exception in node '{node_name}': {str(e)}")
+            logger.debug(traceback.format_exc())
+
+            return {
+                "has_error": True,
+                "error_message": str(e),
+                "error_node": node_name,
+                "current_agent": node_name,
+                "messages": [Message(
+                    role="assistant",
+                    content=f"[{node_name}] Error occurred: {str(e)[:100]}",
+                    agent=node_name
+                )]
+            }
+
+    return safe_node
+
+
+def route_with_error_check(route_func):
+    """
+    Wraps a routing function to check for errors first.
+    """
+    @wraps(route_func)
+    def safe_route(state: Dict[str, Any]) -> str:
+        if state.get("has_error"):
+            return "error_handler"
+        return route_func(state)
+
+    return safe_route
+
+
+def build_research_graph(checkpointer=None, safe_mode: bool = True) -> StateGraph:
     """
     Builds and returns the compiled graph.
 
@@ -108,6 +221,11 @@ def build_research_graph(checkpointer=None) -> StateGraph:
     - Add each agent as a node
     - Wire up the edges between them
     - Set up the conditional routing
+    - Add error handling for graceful degradation
+
+    Args:
+        checkpointer: Optional checkpointer for state persistence
+        safe_mode: If True, wrap nodes with error handling (default: True)
     """
     logger.info("Building research assistant graph")
 
@@ -119,21 +237,40 @@ def build_research_graph(checkpointer=None) -> StateGraph:
 
     workflow = StateGraph(GraphState)
 
+    # Wrap nodes with error handling if safe_mode is enabled
+    if safe_mode:
+        clarity_node = create_safe_node("clarity", clarity_agent.run)
+        research_node = create_safe_node("research", research_agent.run)
+        validator_node = create_safe_node("validator", validator_agent.run)
+        synthesis_node = create_safe_node("synthesis", synthesis_agent.run)
+    else:
+        clarity_node = clarity_agent.run
+        research_node = research_agent.run
+        validator_node = validator_agent.run
+        synthesis_node = synthesis_agent.run
+
     # Add all nodes
-    workflow.add_node("clarity", clarity_agent.run)
+    workflow.add_node("clarity", clarity_node)
     workflow.add_node("human_clarification", human_clarification_node)
-    workflow.add_node("research", research_agent.run)
-    workflow.add_node("validator", validator_agent.run)
-    workflow.add_node("synthesis", synthesis_agent.run)
+    workflow.add_node("research", research_node)
+    workflow.add_node("validator", validator_node)
+    workflow.add_node("synthesis", synthesis_node)
+    workflow.add_node("error_handler", error_handler_node)
 
     # Start with clarity
     workflow.add_edge(START, "clarity")
 
-    # After clarity: either ask for clarification or proceed to research
+    # After clarity: check for errors first, then route normally
+    def route_after_clarity_with_error(state: Dict[str, Any]) -> Literal["error_handler", "human_clarification", "research"]:
+        if state.get("has_error"):
+            return "error_handler"
+        return route_after_clarity(state)
+
     workflow.add_conditional_edges(
         "clarity",
-        route_after_clarity,
+        route_after_clarity_with_error,
         {
+            "error_handler": "error_handler",
             "human_clarification": "human_clarification",
             "research": "research"
         }
@@ -142,21 +279,62 @@ def build_research_graph(checkpointer=None) -> StateGraph:
     # After getting clarification, go back to clarity to re-evaluate
     workflow.add_edge("human_clarification", "clarity")
 
-    # After research: validate if low confidence, otherwise synthesize
+    # After research: check for errors, then validate or synthesize
+    def route_after_research_with_error(state: Dict[str, Any]) -> Literal["error_handler", "validator", "synthesis"]:
+        if state.get("has_error"):
+            return "error_handler"
+        return route_after_research(state)
+
     workflow.add_conditional_edges(
         "research",
-        route_after_research,
+        route_after_research_with_error,
         {
+            "error_handler": "error_handler",
             "validator": "validator",
             "synthesis": "synthesis"
         }
     )
 
-    # After validation: retry research if needed, otherwise synthesize
+    # After validation: check for errors, then retry or synthesize
+    def route_after_validation_with_error(state: Dict[str, Any]) -> Literal["error_handler", "research", "synthesis"]:
+        if state.get("has_error"):
+            return "error_handler"
+        return route_after_validation(state)
+
     workflow.add_conditional_edges(
         "validator",
-        route_after_validation,
+        route_after_validation_with_error,
         {
+            "error_handler": "error_handler",
+            "research": "research",
+            "synthesis": "synthesis"
+        }
+    )
+
+    # After error handler: try to recover or go to synthesis
+    def route_after_error(state: Dict[str, Any]) -> Literal["clarity", "research", "synthesis"]:
+        error_node = state.get("error_node", "")
+        recoverable = state.get("error_recoverable", False)
+
+        if not recoverable:
+            # Unrecoverable - go to synthesis with available data
+            return "synthesis"
+
+        # Attempt recovery based on where error occurred
+        if error_node == "clarity":
+            return "clarity"  # Will trigger human clarification
+        elif error_node == "research":
+            return "research"  # Retry research
+        elif error_node == "validator":
+            return "synthesis"  # Skip validation
+
+        return "synthesis"
+
+    workflow.add_conditional_edges(
+        "error_handler",
+        route_after_error,
+        {
+            "clarity": "clarity",
             "research": "research",
             "synthesis": "synthesis"
         }
@@ -170,7 +348,7 @@ def build_research_graph(checkpointer=None) -> StateGraph:
         checkpointer = MemorySaver()
 
     graph = workflow.compile(checkpointer=checkpointer)
-    logger.info("Graph built successfully")
+    logger.info("Graph built successfully with error handling enabled")
     return graph
 
 
@@ -183,14 +361,20 @@ graph TD
 
     clarity -->|needs_clarification| human[Human Clarification]
     clarity -->|clear| research[Research Agent]
+    clarity -->|error| error[Error Handler]
 
     human --> clarity
 
     research -->|confidence < 6| validator[Validator Agent]
     research -->|confidence >= 6| synthesis[Synthesis Agent]
+    research -->|error| error
 
     validator -->|insufficient & attempts < 3| research
     validator -->|sufficient OR max attempts| synthesis
+    validator -->|error| error
+
+    error -->|recoverable| research
+    error -->|unrecoverable| synthesis
 
     synthesis --> END((End))
 
@@ -199,5 +383,6 @@ graph TD
     style validator fill:#fce4ec
     style synthesis fill:#e8f5e9
     style human fill:#fff9c4
+    style error fill:#ffcdd2
 ```
 """

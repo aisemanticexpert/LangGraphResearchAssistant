@@ -2,7 +2,9 @@
 Research Agent for the Research Assistant.
 
 Conducts company research using available tools and assigns
-confidence scores to findings.
+confidence scores to findings using a hybrid scoring system.
+
+Author: Rajesh Gupta
 """
 
 from typing import Any, Dict
@@ -10,6 +12,7 @@ from typing import Any, Dict
 from .base import BaseAgent
 from ..state import Message, ResearchFindings
 from ..tools.research_tool import ResearchTool
+from ..utils.confidence import calculate_hybrid_confidence, ConfidenceBreakdown
 
 
 class ResearchAgent(BaseAgent):
@@ -19,12 +22,13 @@ class ResearchAgent(BaseAgent):
     Responsibilities:
     - Search for company information (news, financials, developments)
     - Use mock data or search tools based on configuration
-    - Assign confidence score (0-10) to findings
+    - Assign confidence score (0-10) using hybrid scoring system
     - Structure findings for downstream processing
 
     Outputs:
     - research_findings: Structured ResearchFindings object
-    - confidence_score: 0-10 score based on data quality
+    - confidence_score: 0-10 score based on hybrid metrics
+    - confidence_breakdown: Detailed scoring breakdown
     """
 
     def __init__(self):
@@ -123,37 +127,60 @@ If this is a retry after validation feedback, pay special attention to addressin
 
         result = self._parse_json_response(response.content)
 
-        # Extract confidence score, default to 5 if parsing fails
-        confidence_score = result.get("confidence_score", 5.0)
-        if isinstance(confidence_score, str):
+        # Extract LLM's confidence score for hybrid calculation
+        llm_confidence = result.get("confidence_score", 5.0)
+        if isinstance(llm_confidence, str):
             try:
-                confidence_score = float(confidence_score)
+                llm_confidence = float(llm_confidence)
             except ValueError:
-                confidence_score = 5.0
+                llm_confidence = 5.0
 
-        # Ensure score is within bounds
-        confidence_score = max(0.0, min(10.0, confidence_score))
+        llm_reasoning = result.get("confidence_reasoning", "")
 
         # Build structured findings
-        analysis = result.get("analysis", {})
         findings = ResearchFindings(
             company_name=company,
             recent_news=raw_data.get("recent_news"),
             stock_info=raw_data.get("stock_info"),
             key_developments=raw_data.get("key_developments"),
             raw_data=raw_data,
-            sources=["mock_data"]
+            sources=["mock_data"] if "mock" in str(raw_data.get("source", "")).lower() else ["tavily_api"]
+        )
+
+        # Calculate hybrid confidence score (rule-based + LLM)
+        # Convert findings to dict for scoring
+        findings_dict = {
+            "company_name": company,
+            "recent_news": raw_data.get("recent_news"),
+            "stock_info": raw_data.get("stock_info"),
+            "key_developments": raw_data.get("key_developments"),
+            "additional_info": raw_data.get("additional_info", {}),
+            "source": raw_data.get("source", "mock_data"),
+            "sources": findings.sources
+        }
+
+        confidence_score, confidence_breakdown = calculate_hybrid_confidence(
+            findings=findings_dict,
+            query=query,
+            llm_score=llm_confidence,
+            llm_reasoning=llm_reasoning
         )
 
         self._log_execution("Research completed", {
             "company": company,
-            "confidence": confidence_score,
-            "attempt": attempt
+            "confidence": round(confidence_score, 2),
+            "llm_score": llm_confidence,
+            "attempt": attempt,
+            "breakdown": confidence_breakdown.to_dict()
         })
+
+        # Build detailed reasoning from breakdown
+        breakdown_summary = self._format_confidence_breakdown(confidence_breakdown)
 
         return {
             "research_findings": findings,
             "confidence_score": confidence_score,
+            "confidence_breakdown": confidence_breakdown.to_dict(),
             "research_attempts": attempt,
             "current_agent": self.name,
             "validation_result": "pending",  # Reset for validator
@@ -161,7 +188,27 @@ If this is a retry after validation feedback, pay special attention to addressin
                 role="assistant",
                 content=f"[Research Agent] Completed research for {company} "
                         f"(attempt {attempt}/3, confidence: {confidence_score:.1f}/10). "
-                        f"{result.get('confidence_reasoning', '')}",
+                        f"{breakdown_summary}",
                 agent=self.name
             )]
         }
+
+    def _format_confidence_breakdown(self, breakdown: ConfidenceBreakdown) -> str:
+        """Format confidence breakdown for message."""
+        parts = []
+
+        # Add key scores
+        components = breakdown.to_dict()["components"]
+        high_scores = [k for k, v in components.items() if v >= 7]
+        low_scores = [k for k, v in components.items() if v < 5]
+
+        if high_scores:
+            parts.append(f"Strong: {', '.join(s.replace('_', ' ') for s in high_scores)}")
+
+        if low_scores:
+            parts.append(f"Weak: {', '.join(s.replace('_', ' ') for s in low_scores)}")
+
+        if breakdown.gaps:
+            parts.append(f"Gaps: {', '.join(breakdown.gaps[:2])}")
+
+        return " | ".join(parts) if parts else "Scoring complete"

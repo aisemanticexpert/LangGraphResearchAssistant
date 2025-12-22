@@ -1,10 +1,8 @@
 """
-conditions.py - Routing logic between agents
+Routing logic - where does the graph go next?
 
-These functions decide where to go next based on what each agent returned.
-LangGraph calls these after each node to figure out the next step.
-
-Author: Rajesh Gupta
+Each function looks at the current state and decides the next node.
+Pretty simple stuff - just checking status values and confidence scores.
 """
 
 from typing import Any, Dict, Literal
