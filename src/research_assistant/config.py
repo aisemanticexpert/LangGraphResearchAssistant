@@ -28,7 +28,9 @@ class Settings(BaseSettings):
     temperature: float = 0.0
 
     # research behavior
-    use_mock_data: bool = True  # flip to False if you have Tavily
+    # Priority: Tavily API (if TAVILY_API_KEY is set) > Mock data (fallback)
+    # use_mock_data only applies when Tavily API key is NOT configured
+    use_mock_data: bool = True
     max_research_attempts: int = 3
     confidence_threshold: float = 6.0  # below this triggers validation
 

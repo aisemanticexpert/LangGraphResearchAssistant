@@ -27,22 +27,36 @@ class ResearchTool:
         self._init_tavily()
 
     def _init_tavily(self):
-        """Initialize Tavily client if API key is available."""
-        if settings.tavily_api_key and not settings.use_mock_data:
+        """
+        Initialize Tavily client if API key is available.
+
+        Priority:
+        1. If Tavily API key is configured -> use Tavily (preferred)
+        2. If use_mock_data is explicitly True AND no Tavily key -> use mock data
+        3. If no Tavily key available -> fall back to mock data
+        """
+        # Check if Tavily API key is properly configured
+        if settings.validate_tavily_key():
             try:
                 from tavily import TavilyClient
                 self._tavily_client = TavilyClient(api_key=settings.tavily_api_key)
-                self.logger.info("ResearchTool initialized with Tavily Search API")
+                self.logger.info("ResearchTool initialized with Tavily Search API (PREFERRED)")
             except ImportError:
                 self.logger.warning(
-                    "Tavily package not installed. Install with: pip install tavily-python"
+                    "Tavily package not installed. Install with: pip install tavily-python. "
+                    "Falling back to mock data."
                 )
                 self._tavily_client = None
             except Exception as e:
-                self.logger.warning(f"Failed to initialize Tavily client: {e}")
+                self.logger.warning(f"Failed to initialize Tavily client: {e}. Falling back to mock data.")
                 self._tavily_client = None
+        elif settings.use_mock_data:
+            self.logger.info("ResearchTool initialized with mock data (use_mock_data=True, no Tavily key)")
         else:
-            self.logger.info("ResearchTool initialized with mock data")
+            self.logger.warning(
+                "No Tavily API key configured. Set TAVILY_API_KEY in .env file. "
+                "Using mock data as fallback."
+            )
 
     @property
     def is_tavily_enabled(self) -> bool:
@@ -235,13 +249,24 @@ class ResearchTool:
         """Resolve a company name or alias to its canonical form."""
         normalized = name.lower().strip()
 
+        # Remove common suffixes for matching
+        normalized_clean = normalized.replace(" inc.", "").replace(" inc", "").replace(" corp.", "").replace(" corp", "")
+
         # Check aliases first
         if normalized in COMPANY_ALIASES:
             return COMPANY_ALIASES[normalized]
 
+        # Try without suffixes
+        if normalized_clean in COMPANY_ALIASES:
+            return COMPANY_ALIASES[normalized_clean]
+
         # Check direct matches
         for key in MOCK_RESEARCH_DATA:
             if key.lower() == normalized:
+                return key
+            # Also check without common suffixes
+            key_clean = key.lower().replace(" inc.", "").replace(" inc", "")
+            if key_clean == normalized_clean:
                 return key
 
         return None

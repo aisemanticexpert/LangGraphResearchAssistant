@@ -1,15 +1,29 @@
 """
-Research Assistant - Multi-Agent System
+LangGraph Research Assistant - Production-Ready Multi-Agent System
+===================================================================
 
-Built this to explore LangGraph's capabilities for building agent workflows.
-The idea is simple: instead of one big agent trying to do everything, we have
-4 smaller agents that each do one thing well and pass work to each other.
+A sophisticated multi-agent system for company research featuring:
+- UltraThink Intent Analysis (deep reasoning before action)
+- RAGHEAT-inspired confidence scoring
+- Comprehensive guardrails (48+ safety patterns)
+- Human-in-the-loop capabilities
+- Tavily Search API integration
 
-Author: Rajesh Gupta
+The system uses 5 specialized AI agents working together:
+1. UltraThink Intent Agent - Deep intent analysis (ALWAYS FIRST)
+2. Research Agent - Data gathering with RAGHEAT scoring
+3. Validator Agent - Quality assessment
+4. Synthesis Agent - Response generation
+5. (Legacy) Clarity Agent - Query understanding
+
+Developer: Rajesh Gupta
+Copyright (c) 2024 Rajesh Gupta. All rights reserved.
 """
 
 __version__ = "1.0.0"
 __author__ = "Rajesh Gupta"
+__email__ = "rajesh.gupta@example.com"
+__license__ = "MIT"
 
 from .app import ResearchAssistantApp
 from .state import ResearchAssistantState
