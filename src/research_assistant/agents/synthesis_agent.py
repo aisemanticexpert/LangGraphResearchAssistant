@@ -1,26 +1,5 @@
 """
-Synthesis Agent for the Research Assistant
-===========================================
-
-The Synthesis Agent is the final node in the workflow, responsible for:
-    1. Creating professional, user-friendly responses
-    2. Formatting research findings appropriately
-    3. Adding financial disclaimers
-    4. Handling low-confidence scenarios gracefully
-    5. Integrating output guardrails
-
-Response Templates:
-    - Executive Summary: Quick overview with key metrics
-    - Detailed Analysis: In-depth breakdown by category
-    - Low Confidence: Appropriate caveats and limitations
-
-Output Features:
-    - Market regime-aware formatting
-    - Confidence-based styling
-    - Financial disclaimer injection
-    - Stale data warnings
-
-Author: Rajesh Gupta
+Synthesis agent for generating final user responses.
 """
 
 from datetime import datetime
@@ -84,54 +63,61 @@ class SynthesisAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        return """You are a Synthesis Agent specializing in creating clear, professional research summaries.
+        return """You are a Research Assistant that ANSWERS USER QUESTIONS directly.
 
-Your task is to transform research findings into a well-organized, helpful response
-that DIRECTLY answers the user's specific question based on their intent.
+CRITICAL: Read the user's ACTUAL question and answer THAT question, not a generic summary.
 
-INTENT-BASED RESPONSE STRUCTURE:
+EXAMPLES:
+- "best price to buy apple" → Discuss valuation, P/E ratios, analyst targets, NOT just current price
+- "should I invest in Tesla" → Discuss pros/cons, risks, market outlook, NOT just company overview
+- "is Microsoft overvalued" → Analyze valuation metrics, compare to peers
+- "what is Apple's stock price" → Give current price and recent changes
 
-For "leadership" intent (CEO, owner, founder questions):
-- **Lead with the answer**: State the CEO/owner/founder's name prominently
-- Include their background, tenure, and notable achievements
-- Mention other key executives if relevant
-- Company founding history if available
+RESPONSE BY QUESTION TYPE:
 
-For "stock_price" intent:
-- **Lead with current stock price**
-- Include price change, trading volume
-- 52-week range if available
-- Market cap
+For INVESTMENT/BUY questions ("best price to buy", "should I buy", "good time to invest"):
+- Discuss current valuation (P/E, P/S ratios)
+- Mention analyst price targets if available
+- Discuss recent price trends
+- List key risks and opportunities
+- NEVER give specific buy/sell advice - explain factors to consider
+- Always add strong disclaimer
 
-For "financial_analysis" intent:
-- Focus on key financial metrics
-- Revenue, earnings, margins
-- Growth trends
+For VALUATION questions ("overvalued", "undervalued", "fair value"):
+- Compare current price to historical averages
+- Discuss P/E vs industry peers
+- Mention analyst consensus
+- Be objective about both bull and bear cases
 
-For "company_overview" intent:
-- Brief company description
-- Key business segments
-- Recent developments
-- Market position
+For STOCK PRICE questions:
+- Lead with current price
+- Include recent changes
+- 52-week range
 
-For "news_developments" intent:
-- Lead with most recent/important news
-- Key strategic initiatives
-- Market reactions
+For COMPANY questions:
+- Brief overview
+- Recent news
+- Key metrics
 
-GUIDELINES:
-- **DIRECTLY ANSWER the specific question first** - don't bury the answer
-- USE specific data (numbers, names, dates) - not vague statements
-- FORMAT with headers and bullet points for readability
-- BE CONCISE but comprehensive
-- ACKNOWLEDGE limitations if confidence is low
-- DO NOT repeat the question back
-- DO NOT make investment recommendations
-- MAINTAIN a professional, objective tone
+IMPORTANT - ALWAYS END WITH OUTLOOK SUMMARY:
+At the end of EVERY response (except greetings), include a brief outlook section:
 
-If the research has gaps, still provide the best possible answer with available information.
+**Outlook:** [Bullish/Bearish/Neutral] - [1-2 sentence summary of why]
 
-Write a natural language response - do NOT output JSON."""
+Use the market regime and sentiment data provided to determine the outlook:
+- BULL regime + positive sentiment = Bullish
+- BEAR regime + negative sentiment = Bearish
+- SIDEWAYS or mixed signals = Neutral
+
+CRITICAL RULES:
+1. ANSWER THE ACTUAL QUESTION - don't give a generic company report
+2. Be conversational - this is a chat, not a formal report
+3. Acknowledge when you don't have specific data
+4. For investment questions, discuss factors but NEVER recommend buy/sell
+5. Keep responses focused and relevant
+6. ALWAYS include the Outlook summary at the end
+
+Write naturally - do NOT output JSON."""
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -182,6 +168,9 @@ Write a natural language response - do NOT output JSON."""
         # Detect market regime for context
         market_regime = self._get_market_regime(research_findings)
 
+        # Generate outlook summary from data
+        outlook_summary = self._generate_outlook_summary(research_findings, confidence_score)
+
         # Generate response via LLM
         prompt = self._create_prompt(
             "Create a professional research response:\n\n"
@@ -189,12 +178,14 @@ Write a natural language response - do NOT output JSON."""
             "Company: {company}\n\n"
             "Query Intent: {intent}\n\n"
             "Market Regime: {regime}\n\n"
+            "Calculated Outlook: {outlook}\n\n"
             "Research Findings:\n{findings}\n\n"
             "Confidence Score: {confidence}/10\n"
             "Research Attempts: {attempts}/3\n"
             "{notes}\n\n"
             "Conversation Context:\n{context}\n\n"
-            "Generate a clear, well-organized response that addresses the user's specific question."
+            "Generate a clear, well-organized response that addresses the user's specific question.\n"
+            "IMPORTANT: End your response with:\n**Outlook:** {outlook}"
         )
 
         chain = prompt | self.llm
@@ -203,6 +194,7 @@ Write a natural language response - do NOT output JSON."""
             "company": company,
             "intent": query_intent,
             "regime": market_regime,
+            "outlook": outlook_summary,
             "findings": findings_str,
             "confidence": confidence_score,
             "attempts": attempts,
@@ -232,10 +224,42 @@ Write a natural language response - do NOT output JSON."""
         # Calculate processing time
         processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
+        # Determine data source
+        data_source = "mock_data"
+        if research_findings:
+            # Check sources list (ResearchFindings model)
+            if hasattr(research_findings, 'sources') and research_findings.sources:
+                sources = research_findings.sources
+                if "tavily_api" in sources or "tavily_search" in sources:
+                    data_source = "tavily_search"
+                elif "mock_data" in sources:
+                    data_source = "mock_data"
+                else:
+                    data_source = sources[0] if sources else "mock_data"
+            # Check raw_data for source field
+            elif hasattr(research_findings, 'raw_data') and research_findings.raw_data:
+                raw_source = research_findings.raw_data.get("source", "")
+                if "tavily" in str(raw_source).lower():
+                    data_source = "tavily_search"
+                else:
+                    data_source = raw_source or "mock_data"
+            # Dict format
+            elif isinstance(research_findings, dict):
+                if "sources" in research_findings:
+                    sources = research_findings["sources"]
+                    if isinstance(sources, list) and sources:
+                        if "tavily_api" in sources or "tavily_search" in sources:
+                            data_source = "tavily_search"
+                        else:
+                            data_source = sources[0]
+                elif "source" in research_findings:
+                    data_source = research_findings.get("source", "mock_data")
+
         self._log_execution("Response synthesized", {
             "response_length": len(final_response),
             "has_warnings": guardrail_result.metadata.get("enhanced", False),
-            "processing_time_ms": round(processing_time, 2)
+            "processing_time_ms": round(processing_time, 2),
+            "data_source": data_source
         })
 
         return {
@@ -244,6 +268,7 @@ Write a natural language response - do NOT output JSON."""
             "workflow_status": "completed",
             "current_agent": self.name,
             "total_processing_time_ms": processing_time,
+            "data_source": data_source,
             "messages": [Message(
                 role="assistant",
                 content=final_response,
@@ -251,7 +276,8 @@ Write a natural language response - do NOT output JSON."""
                 metadata={
                     "confidence_score": confidence_score,
                     "company": company,
-                    "processing_time_ms": processing_time
+                    "processing_time_ms": processing_time,
+                    "data_source": data_source
                 }
             )]
         }
@@ -445,6 +471,111 @@ Write a natural language response - do NOT output JSON."""
             return str(regime)
 
         return "unknown"
+
+    def _generate_outlook_summary(
+        self,
+        findings: Optional[ResearchFindings],
+        confidence_score: float
+    ) -> str:
+        """
+        Generate outlook summary based on sentiment and market regime.
+
+        Args:
+            findings: Research findings with sentiment data
+            confidence_score: RAGHEAT confidence score
+
+        Returns:
+            Outlook summary string (Bullish/Bearish/Neutral with reasoning)
+        """
+        if not findings:
+            return "Neutral - Insufficient data for outlook assessment"
+
+        # Get market regime
+        regime = "unknown"
+        if hasattr(findings, 'market_regime'):
+            regime_val = findings.market_regime
+            if hasattr(regime_val, 'value'):
+                regime = regime_val.value
+            else:
+                regime = str(regime_val)
+
+        # Get sentiment from factor data
+        sentiment_score = 0.5  # Default neutral
+        if hasattr(findings, 'factor_data') and findings.factor_data:
+            if 'sentiment' in findings.factor_data:
+                sent_data = findings.factor_data['sentiment']
+                sentiment_score = sent_data.get('news_sentiment', 0.5)
+
+        # Get news sentiment average if available
+        if hasattr(findings, 'recent_news') and findings.recent_news:
+            news_sentiments = [
+                n.sentiment for n in findings.recent_news
+                if hasattr(n, 'sentiment')
+            ]
+            if news_sentiments:
+                sentiment_score = sum(news_sentiments) / len(news_sentiments)
+
+        # Determine outlook
+        bullish_signals = 0
+        bearish_signals = 0
+        reasons = []
+
+        # Check regime
+        if regime == "bull":
+            bullish_signals += 2
+            reasons.append("positive market momentum")
+        elif regime == "bear":
+            bearish_signals += 2
+            reasons.append("negative market momentum")
+
+        # Check sentiment
+        if sentiment_score > 0.6:
+            bullish_signals += 1
+            reasons.append("positive news sentiment")
+        elif sentiment_score < 0.4:
+            bearish_signals += 1
+            reasons.append("negative news sentiment")
+
+        # Check stock performance if available
+        if hasattr(findings, 'stock_info') and findings.stock_info:
+            stock = findings.stock_info
+            if hasattr(stock, 'change_percent') and stock.change_percent is not None:
+                if stock.change_percent > 2:
+                    bullish_signals += 1
+                    reasons.append("strong recent price action")
+                elif stock.change_percent < -2:
+                    bearish_signals += 1
+                    reasons.append("weak recent price action")
+
+        # Generate final outlook
+        if bullish_signals >= 2 and bullish_signals > bearish_signals:
+            outlook = "Bullish"
+        elif bearish_signals >= 2 and bearish_signals > bullish_signals:
+            outlook = "Bearish"
+        else:
+            outlook = "Neutral"
+
+        # Determine confidence label
+        if confidence_score >= 8:
+            confidence_label = "High"
+        elif confidence_score >= 6:
+            confidence_label = "Good"
+        elif confidence_score >= 4:
+            confidence_label = "Moderate"
+        else:
+            confidence_label = "Low"
+
+        # Build reason string
+        if reasons:
+            reason_str = ", ".join(reasons[:3])
+        else:
+            reason_str = "mixed signals in available data"
+
+        # Return outlook with confidence score
+        return (
+            f"{outlook} - {reason_str}\n"
+            f"**Data Confidence:** {confidence_score:.1f}/10 ({confidence_label})"
+        )
 
     def _extract_executive_summary(self, response: str) -> str:
         """

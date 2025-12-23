@@ -1,35 +1,5 @@
 """
-State Schema for LangGraph Research Assistant
-==============================================
-
-This module defines comprehensive Pydantic models for the multi-agent research workflow.
-The schema integrates concepts from the RAGHEAT research paper's weighted factor taxonomy
-for stock research, providing production-ready type safety and validation.
-
-Key Design Principles:
-    1. Pydantic models for type safety and validation
-    2. RAGHEAT-inspired confidence scoring with normalized weights (sum to 1.0)
-    3. Comprehensive state tracking for all 5 agents
-    4. Human-in-the-loop interrupt support
-    5. Audit trail for compliance and debugging
-
-RAGHEAT Confidence Formula:
-    confidence = Σ(wi × fi) where Σwi = 1.0
-
-    Factors:
-    - data_completeness: 30% - Presence of key data fields
-    - source_diversity: 20% - Number of independent sources
-    - news_coverage: 15% - News quantity and sentiment quality
-    - financial_data: 15% - Financial metrics completeness
-    - recency: 10% - Time decay (exponential)
-    - sentiment_consistency: 10% - Alignment of sentiment signals
-
-Usage:
-    from state import ResearchAssistantState, Message, ResearchFindings
-    state = ResearchAssistantState(user_query="Tell me about Apple")
-
-Developer: Rajesh Gupta
-Copyright (c) 2024 Rajesh Gupta. All rights reserved.
+State models and data structures for the research workflow.
 """
 
 from datetime import datetime
@@ -38,42 +8,22 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-# ============================================================================
-# ENUMS - Clear status definitions for workflow routing
-# ============================================================================
-
 class ClarityStatus(str, Enum):
-    """
-    Status from Clarity Agent analysis.
-
-    Routing Logic:
-        - CLEAR -> Research Agent
-        - NEEDS_CLARIFICATION -> Human-in-the-Loop interrupt
-        - PENDING -> Initial state before analysis
-    """
+    """Query clarity status for routing."""
     CLEAR = "clear"
     NEEDS_CLARIFICATION = "needs_clarification"
     PENDING = "pending"
 
 
 class ValidationResult(str, Enum):
-    """
-    Result from Validator Agent assessment.
-
-    Routing Logic:
-        - SUFFICIENT -> Synthesis Agent
-        - INSUFFICIENT + attempts < 3 -> Research Agent (retry)
-        - INSUFFICIENT + attempts >= 3 -> Synthesis Agent (best effort)
-        - PENDING -> Initial state before validation
-    """
+    """Validation outcome for routing."""
     SUFFICIENT = "sufficient"
     INSUFFICIENT = "insufficient"
     PENDING = "pending"
 
 
 class MarketRegime(str, Enum):
-    """
-    Market regime classification (inspired by RAGHEAT HMM regime detection).
+    """Market regime classification.
 
     Used for context-aware response generation:
         - BULL: Generally positive momentum, risk-on sentiment
@@ -561,6 +511,10 @@ class ResearchAssistantState(BaseModel):
     workflow_status: Literal["in_progress", "completed", "interrupted", "error"] = Field(
         default="in_progress",
         description="Overall workflow status"
+    )
+    data_source: Optional[str] = Field(
+        default=None,
+        description="Data source used (tavily_search or mock_data)"
     )
 
     # ========== ERROR HANDLING ==========

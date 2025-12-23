@@ -1,33 +1,5 @@
 """
-LangGraph Workflow with UltraThink Strategy
-=============================================
-
-This module defines the main workflow graph with an UltraThink-first approach.
-The UltraThink agent DEEPLY ANALYZES intent BEFORE any action is taken.
-
-UltraThink Workflow Architecture:
-    START -> UltraThink (Deep Intent Analysis)
-                |
-                ├── BLOCKED (manipulation/illegal) -> Human Clarification -> END
-                ├── GREETING -> Direct Response -> END
-                ├── UNCLEAR -> Human Clarification -> UltraThink
-                └── LEGITIMATE -> Research -> Validator -> Synthesis -> END
-
-Key Principles:
-    1. THINK FIRST, ACT LATER - Never take action without understanding intent
-    2. DEEP REASONING - Chain-of-thought analysis for accurate classification
-    3. SAFETY FIRST - Block manipulation/illegal queries before processing
-    4. INTENT-AWARE - All downstream agents receive intent context
-
-Features:
-    - Human-in-the-loop interrupt for clarification
-    - Error handling with graceful degradation
-    - State persistence via checkpointer
-    - UltraThink safety patterns (48+ patterns)
-    - RAGHEAT confidence scoring integration
-
-Developer: Rajesh Gupta
-Copyright (c) 2024 Rajesh Gupta. All rights reserved.
+LangGraph workflow definition with intent analysis, research, validation, and synthesis.
 """
 
 import logging
@@ -44,7 +16,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt
 
-from .agents.ultrathink_intent_agent import UltraThinkIntentAgent
+from .agents.thinksemantic_intent_agent import ThinkSemanticIntentAgent
 from .agents.research_agent import ResearchAgent
 from .agents.validator_agent import ValidatorAgent
 from .agents.synthesis_agent import SynthesisAgent
@@ -64,7 +36,7 @@ from .guardrails import AuditLogger, GuardrailConfig
 # Define a TypedDict state for LangGraph proper state management
 class GraphState(TypedDict, total=False):
     """
-    State schema for LangGraph workflow with UltraThink.
+    State schema for LangGraph workflow with ThinkSemantic.
 
     Using TypedDict ensures proper state merging between nodes.
     """
@@ -75,11 +47,11 @@ class GraphState(TypedDict, total=False):
     # Messages with reducer for accumulation
     messages: Annotated[List[Message], add_messages]
 
-    # UltraThink Intent Analysis outputs
-    ultrathink_complete: bool
+    # ThinkSemantic Intent Analysis outputs
+    thinksemantic_complete: bool
     intent_category: Optional[str]  # legitimate_research, manipulation, etc.
-    ultrathink_reasoning: List[str]
-    ultrathink_confidence: float
+    thinksemantic_reasoning: List[str]
+    thinksemantic_confidence: float
     should_proceed: bool
 
     # Clarity/Intent outputs
@@ -186,7 +158,7 @@ def human_clarification_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "user_query": human_response,
         "human_response": human_response,
         "awaiting_human_input": False,
-        "ultrathink_complete": False,  # Re-run UltraThink
+        "thinksemantic_complete": False,  # Re-run ThinkSemantic
         "clarity_status": "pending",
         "clarification_request": None,
         "intent_category": None,  # Reset intent
@@ -259,7 +231,7 @@ def error_handler_node(state: Dict[str, Any]) -> Dict[str, Any]:
     if error_node == "research" and current_attempts < 3:
         recoverable = True
         recovery_action = "Retrying research"
-    elif error_node == "ultrathink":
+    elif error_node == "thinksemantic":
         recoverable = True
         recovery_action = "Asking for clarification"
     elif error_node == "validator":
@@ -316,11 +288,11 @@ def create_safe_node(node_name: str, node_func):
     return safe_node
 
 
-def route_after_ultrathink(state: Dict[str, Any]) -> Literal[
+def route_after_thinksemantic(state: Dict[str, Any]) -> Literal[
     "error_handler", "human_clarification", "greeting", "research"
 ]:
     """
-    Route after UltraThink intent analysis.
+    Route after ThinkSemantic intent analysis.
 
     This is the critical routing decision based on deep intent analysis.
 
@@ -381,7 +353,7 @@ def route_after_validation_with_error(
 
 def route_after_error(
     state: Dict[str, Any]
-) -> Literal["ultrathink", "research", "synthesis"]:
+) -> Literal["thinksemantic", "research", "synthesis"]:
     """Route after error based on recovery strategy."""
     error_node = state.get("error_node", "")
     recoverable = state.get("error_recoverable", False)
@@ -389,8 +361,8 @@ def route_after_error(
     if not recoverable:
         return "synthesis"
 
-    if error_node == "ultrathink":
-        return "ultrathink"
+    if error_node == "thinksemantic":
+        return "thinksemantic"
     elif error_node == "research":
         return "research"
 
@@ -404,9 +376,9 @@ def build_research_graph(
     audit_logger: Optional[AuditLogger] = None
 ) -> StateGraph:
     """
-    Build and compile the UltraThink research assistant workflow graph.
+    Build and compile the ThinkSemantic research assistant workflow graph.
 
-    The UltraThink-first architecture ensures:
+    The ThinkSemantic-first architecture ensures:
         1. Deep intent analysis BEFORE any action
         2. Blocked queries never reach research agents
         3. Intent context flows to all downstream agents
@@ -421,10 +393,10 @@ def build_research_graph(
     Returns:
         Compiled StateGraph ready for execution
     """
-    logger.info("Building research assistant graph with UltraThink strategy")
+    logger.info("Building research assistant graph with ThinkSemantic strategy")
 
     # Create agents
-    ultrathink_agent = UltraThinkIntentAgent(
+    thinksemantic_agent = ThinkSemanticIntentAgent(
         guardrail_config=guardrail_config,
         audit_logger=audit_logger
     )
@@ -437,18 +409,18 @@ def build_research_graph(
 
     # Wrap nodes with error handling
     if safe_mode:
-        ultrathink_node = create_safe_node("ultrathink", ultrathink_agent.run)
+        thinksemantic_node = create_safe_node("thinksemantic", thinksemantic_agent.run)
         research_node = create_safe_node("research", research_agent.run)
         validator_node = create_safe_node("validator", validator_agent.run)
         synthesis_node = create_safe_node("synthesis", synthesis_agent.run)
     else:
-        ultrathink_node = ultrathink_agent.run
+        thinksemantic_node = thinksemantic_agent.run
         research_node = research_agent.run
         validator_node = validator_agent.run
         synthesis_node = synthesis_agent.run
 
     # Add all nodes
-    workflow.add_node("ultrathink", ultrathink_node)
+    workflow.add_node("thinksemantic", thinksemantic_node)
     workflow.add_node("human_clarification", human_clarification_node)
     workflow.add_node("greeting", greeting_response_node)
     workflow.add_node("research", research_node)
@@ -456,13 +428,13 @@ def build_research_graph(
     workflow.add_node("synthesis", synthesis_node)
     workflow.add_node("error_handler", error_handler_node)
 
-    # START -> UltraThink (ALWAYS analyze intent first)
-    workflow.add_edge(START, "ultrathink")
+    # START -> ThinkSemantic (ALWAYS analyze intent first)
+    workflow.add_edge(START, "thinksemantic")
 
-    # UltraThink routing (critical decision point)
+    # ThinkSemantic routing (critical decision point)
     workflow.add_conditional_edges(
-        "ultrathink",
-        route_after_ultrathink,
+        "thinksemantic",
+        route_after_thinksemantic,
         {
             "error_handler": "error_handler",
             "human_clarification": "human_clarification",
@@ -471,8 +443,8 @@ def build_research_graph(
         }
     )
 
-    # Human Clarification -> Back to UltraThink for re-analysis
-    workflow.add_edge("human_clarification", "ultrathink")
+    # Human Clarification -> Back to ThinkSemantic for re-analysis
+    workflow.add_edge("human_clarification", "thinksemantic")
 
     # Greeting -> END
     workflow.add_edge("greeting", END)
@@ -504,7 +476,7 @@ def build_research_graph(
         "error_handler",
         route_after_error,
         {
-            "ultrathink": "ultrathink",
+            "thinksemantic": "thinksemantic",
             "research": "research",
             "synthesis": "synthesis"
         }
@@ -520,25 +492,25 @@ def build_research_graph(
     # Compile the graph
     graph = workflow.compile(checkpointer=checkpointer)
 
-    logger.info("Research assistant graph built successfully with UltraThink")
+    logger.info("Research assistant graph built successfully with ThinkSemantic")
 
     return graph
 
 
 def get_graph_visualization() -> str:
-    """Generate Mermaid diagram of the UltraThink workflow."""
+    """Generate Mermaid diagram of the ThinkSemantic workflow."""
     return """
 ```mermaid
 graph TD
-    START((Start)) --> ultrathink[UltraThink Intent Agent]
+    START((Start)) --> thinksemantic[ThinkSemantic Intent Agent]
 
-    ultrathink -->|BLOCKED: manipulation/illegal| human[Human Clarification]
-    ultrathink -->|UNCLEAR: needs clarification| human
-    ultrathink -->|GREETING| greeting[Greeting Response]
-    ultrathink -->|LEGITIMATE RESEARCH| research[Research Agent]
-    ultrathink -->|error| error[Error Handler]
+    thinksemantic -->|BLOCKED: manipulation/illegal| human[Human Clarification]
+    thinksemantic -->|UNCLEAR: needs clarification| human
+    thinksemantic -->|GREETING| greeting[Greeting Response]
+    thinksemantic -->|LEGITIMATE RESEARCH| research[Research Agent]
+    thinksemantic -->|error| error[Error Handler]
 
-    human --> ultrathink
+    human --> thinksemantic
 
     greeting --> END((End))
 
@@ -550,12 +522,12 @@ graph TD
     validator -->|sufficient OR max attempts| synthesis
     validator -->|error| error
 
-    error -->|recoverable| ultrathink
+    error -->|recoverable| thinksemantic
     error -->|unrecoverable| synthesis
 
     synthesis --> END
 
-    style ultrathink fill:#ff9800,stroke:#e65100,color:#fff
+    style thinksemantic fill:#ff9800,stroke:#e65100,color:#fff
     style research fill:#2196f3
     style validator fill:#9c27b0
     style synthesis fill:#4caf50
@@ -567,13 +539,13 @@ graph TD
 
 
 def print_workflow_description():
-    """Print UltraThink workflow description."""
+    """Print ThinkSemantic workflow description."""
     description = """
     ╔═══════════════════════════════════════════════════════════════════════╗
-    ║              ULTRATHINK RESEARCH ASSISTANT WORKFLOW                   ║
+    ║            THINKSEMANTIC RESEARCH ASSISTANT WORKFLOW                  ║
     ╠═══════════════════════════════════════════════════════════════════════╣
     ║                                                                       ║
-    ║  0. ULTRATHINK INTENT AGENT (First, Always)                          ║
+    ║  0. THINKSEMANTIC INTENT AGENT (First, Always)                       ║
     ║     - Deep chain-of-thought reasoning                                ║
     ║     - Safety analysis (manipulation, insider trading, injection)    ║
     ║     - Intent classification (leadership, stock, news, etc.)         ║

@@ -137,9 +137,16 @@ class ResearchTool:
             searches["stock"] = stock_results
 
             # Search for key developments based on user query
+            # Truncate to stay under Tavily's 400 char limit
             dev_query = f"{company_name} {query}"
             if validation_feedback:
-                dev_query = f"{company_name} {validation_feedback}"
+                # Extract key terms from feedback instead of using full text
+                feedback_short = validation_feedback[:150] if len(validation_feedback) > 150 else validation_feedback
+                dev_query = f"{company_name} {feedback_short}"
+
+            # Ensure query is under 400 chars
+            if len(dev_query) > 380:
+                dev_query = dev_query[:380]
 
             dev_results = self._tavily_client.search(
                 query=dev_query,

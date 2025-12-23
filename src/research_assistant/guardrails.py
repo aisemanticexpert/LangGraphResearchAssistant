@@ -1,37 +1,5 @@
 """
-Guardrails Module for LangGraph Research Assistant
-===================================================
-
-Production-grade input/output validation for securities research.
-Implements SEC/FINRA compliance requirements and best practices.
-
-This module provides comprehensive protection against:
-    1. Prompt injection attacks (10+ patterns)
-    2. Market manipulation queries (30+ patterns)
-    3. Insider trading facilitation (8+ patterns)
-    4. Low-quality or stale data responses
-
-Key Components:
-    - InputGuardrails: Query validation and sanitization
-    - OutputGuardrails: Response quality and compliance checks
-    - CompanyNameValidator: Company name normalization (50+ companies)
-    - AuditLogger: Compliance audit trail
-    - GuardrailConfig: Customizable configuration
-
-Usage:
-    from guardrails import InputGuardrails, OutputGuardrails
-
-    input_guard = InputGuardrails()
-    result = input_guard.validate_query("Tell me about Apple")
-
-    if result.passed:
-        # Process the sanitized query
-        query = result.sanitized_content
-
-Total Safety Patterns: 48+
-
-Developer: Rajesh Gupta
-Copyright (c) 2024 Rajesh Gupta. All rights reserved.
+Input/output validation and safety guardrails for research queries.
 """
 
 import re
@@ -44,62 +12,30 @@ from enum import Enum
 from pathlib import Path
 
 
-# Configure module logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
-# VIOLATION TYPES - Categories of guardrail violations
-# ============================================================================
-
 class GuardrailViolationType(str, Enum):
-    """
-    Types of guardrail violations for categorized handling.
-
-    Each type has specific handling logic and user messaging.
-    """
-    # Input violations
+    """Violation type categories."""
     EMPTY_INPUT = "empty_input"
     INVALID_CHARACTERS = "invalid_characters"
     PROMPT_INJECTION = "prompt_injection"
     TOO_LONG = "too_long"
     TOO_SHORT = "too_short"
-
-    # Compliance violations
     MARKET_MANIPULATION = "market_manipulation"
     INSIDER_TRADING = "insider_trading"
-
-    # Content violations
     HARMFUL_CONTENT = "harmful_content"
     PROFANITY = "profanity"
     PERSONAL_INFO = "personal_info"
-
-    # Output violations
     MISSING_DISCLAIMER = "missing_disclaimer"
     LOW_CONFIDENCE = "low_confidence"
     STALE_DATA = "stale_data"
 
 
-# ============================================================================
-# RESULT DATACLASSES
-# ============================================================================
-
 @dataclass
 class GuardrailResult:
-    """
-    Result of a guardrail validation check.
-
-    Provides detailed information about whether validation passed,
-    what violation occurred (if any), and sanitized content.
-
-    Attributes:
-        passed: Whether the validation passed
-        violation_type: Type of violation if failed
-        violation_message: User-friendly message explaining the violation
-        sanitized_content: Cleaned/safe version of the content
-        metadata: Additional context (timestamps, scores, etc.)
-    """
+    """Validation result container."""
     passed: bool
     violation_type: Optional[GuardrailViolationType] = None
     violation_message: Optional[str] = None
@@ -138,36 +74,9 @@ class GuardrailConfig:
     log_all_checks: bool = True
 
 
-# ============================================================================
-# INPUT GUARDRAILS - Query validation and sanitization
-# ============================================================================
-
 class InputGuardrails:
-    """
-    Input validation guardrails for user queries.
+    """Validates and sanitizes user queries."""
 
-    Ensures queries are safe, properly formatted, and don't request
-    illegal or harmful information.
-
-    Validation Layers:
-        1. Format validation (length, characters)
-        2. Prompt injection detection
-        3. Market manipulation detection
-        4. Insider trading detection
-        5. Content sanitization
-
-    Usage:
-        guardrails = InputGuardrails()
-        result = guardrails.validate_query("Tell me about Apple stock")
-
-        if result.passed:
-            safe_query = result.sanitized_content
-        else:
-            error_msg = result.violation_message
-    """
-
-    # Patterns indicating prompt injection attempts
-    # These catch common jailbreak techniques
     PROMPT_INJECTION_PATTERNS = [
         r"ignore\s+(previous|all|above)\s+instructions",
         r"disregard\s+(your|all)\s+instructions",
@@ -181,10 +90,7 @@ class InputGuardrails:
         r"```\s*(system|admin)",
     ]
 
-    # Patterns indicating market manipulation requests
-    # These are illegal under SEC regulations
     MARKET_MANIPULATION_PATTERNS = [
-        # Classic manipulation schemes
         r"pump\s+and\s+dump",
         r"short\s+and\s+distort",
         r"manipulate\s+(the\s+)?(stock|market|price)",
@@ -195,35 +101,23 @@ class InputGuardrails:
         r"spoofing",
         r"layering",
         r"wash\s+trad(e|ing)",
-
-        # Dump/exit manipulation language
         r"(how\s+(can|do|to)|help\s+(me\s+)?|want\s+to)\s*dump\s+(my\s+)?(stock|shares|position|holdings?)",
         r"dump\s+(the\s+)?(stock|shares|market|price)",
         r"(crash|tank|destroy|crush|kill)\s+(the\s+)?(stock|shares|price|market)",
         r"make\s+(the\s+)?(stock|price|shares)\s+(crash|tank|fall|drop|plummet)",
         r"drive\s+(down|up)\s+(the\s+)?(stock|price|shares)",
-
-        # Coordinated trading language
         r"(organize|coordinate|plan)\s+(a\s+)?(sell[\s-]?off|buying\s+spree|mass\s+(buying|selling))",
         r"get\s+everyone\s+to\s+(buy|sell)",
         r"(convince|persuade|get)\s+(people|others|investors)\s+to\s+(buy|sell|dump)",
-
-        # Short selling manipulation
         r"naked\s+short(ing)?",
         r"(short\s+)?ladder\s+attack",
         r"bear\s+raid",
-
-        # General manipulation intent
         r"(rig|fix)\s+(the\s+)?(market|stock|price)",
         r"corner\s+the\s+market",
-
-        # Dump + company name patterns (catching "dump moderna", "dump apple", etc.)
         r"(how\s+(can|do|to|should)\s+i?|help\s+(me\s+)?|want\s+to|going\s+to|need\s+to)\s*dump\s+\w+",
         r"dump(ing)?\s+(all\s+)?(my\s+)?\w+\s*(stock|shares|position)?",
     ]
 
-    # Patterns indicating insider trading queries
-    # Trading on material non-public info is illegal
     INSIDER_TRADING_PATTERNS = [
         r"insider\s+(trading|information|tips?)",
         r"non\s*-?\s*public\s+information",
@@ -234,17 +128,10 @@ class InputGuardrails:
     ]
 
     def __init__(self, config: Optional[GuardrailConfig] = None):
-        """
-        Initialize InputGuardrails with configuration.
-
-        Args:
-            config: Optional GuardrailConfig for customization
-        """
         self.config = config or GuardrailConfig()
         self._compile_patterns()
 
     def _compile_patterns(self):
-        """Pre-compile regex patterns for efficiency."""
         self._injection_regex = [
             re.compile(p, re.IGNORECASE)
             for p in self.PROMPT_INJECTION_PATTERNS
@@ -259,23 +146,7 @@ class InputGuardrails:
         ]
 
     def validate_query(self, query: str) -> GuardrailResult:
-        """
-        Perform comprehensive validation on user query.
-
-        Runs through all validation layers in order of priority:
-            1. Empty/null check
-            2. Sanitization
-            3. Length constraints
-            4. Prompt injection check
-            5. Compliance checks (manipulation, insider trading)
-
-        Args:
-            query: The user's input query
-
-        Returns:
-            GuardrailResult with pass/fail status and details
-        """
-        # Layer 1: Check for empty input
+        """Validate user query for safety and compliance."""
         if not query or not query.strip():
             return GuardrailResult(
                 passed=False,
@@ -283,10 +154,8 @@ class InputGuardrails:
                 violation_message="Query cannot be empty. Please enter a question about a company."
             )
 
-        # Layer 2: Sanitize and normalize
         sanitized = self._sanitize_query(query)
 
-        # Layer 3: Check length constraints
         if len(sanitized) < self.config.min_query_length:
             return GuardrailResult(
                 passed=False,
@@ -302,13 +171,11 @@ class InputGuardrails:
                 sanitized_content=sanitized[:self.config.max_query_length]
             )
 
-        # Layer 4: Check for prompt injection
         if self.config.enable_prompt_injection_detection:
             injection_result = self._check_prompt_injection(sanitized)
             if not injection_result.passed:
                 return injection_result
 
-        # Layer 5: Compliance checks
         if self.config.enable_compliance_checks:
             manipulation_result = self._check_market_manipulation(sanitized)
             if not manipulation_result.passed:
@@ -318,7 +185,6 @@ class InputGuardrails:
             if not insider_result.passed:
                 return insider_result
 
-        # All checks passed
         if self.config.log_all_checks:
             logger.info(f"Query validation passed: {sanitized[:50]}...")
 
@@ -333,29 +199,10 @@ class InputGuardrails:
         )
 
     def _sanitize_query(self, query: str) -> str:
-        """
-        Sanitize query by removing potentially harmful content.
-
-        Removes:
-            - Null bytes and control characters
-            - HTML/XML tags
-            - Excessive whitespace
-
-        Args:
-            query: Raw user query
-
-        Returns:
-            Sanitized query string
-        """
-        # Remove null bytes and control characters (except common whitespace)
+        """Remove harmful content from query."""
         sanitized = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', query)
-
-        # Normalize whitespace (collapse multiple spaces/newlines)
         sanitized = ' '.join(sanitized.split())
-
-        # Remove HTML/XML tags
         sanitized = re.sub(r'<[^>]+>', '', sanitized)
-
         return sanitized.strip()
 
     def _check_prompt_injection(self, query: str) -> GuardrailResult:
@@ -809,15 +656,19 @@ class CompanyNameValidator:
         "IBM": "International Business Machines Corporation",
     }
 
+    # Minimum length for substring matching (shorter aliases require word boundary)
+    MIN_SUBSTRING_LENGTH = 4
+
     @classmethod
     def normalize_company_name(cls, query: str) -> Tuple[Optional[str], Optional[str]]:
         """
         Extract and normalize company name from query.
 
         Attempts multiple matching strategies:
-            1. Direct alias match
-            2. Ticker symbol match
-            3. Partial name match
+            1. Exact word match for short aliases (with word boundaries)
+            2. Substring match for longer aliases
+            3. Ticker symbol match
+            4. Partial name match
 
         Args:
             query: User query that may contain company name
@@ -828,13 +679,23 @@ class CompanyNameValidator:
         query_lower = query.lower().strip()
 
         # Strategy 1: Check for direct alias match
+        # For short aliases (< 4 chars), require word boundaries to avoid false positives
         for alias, canonical in cls.COMPANY_ALIASES.items():
-            if alias in query_lower:
-                # Find corresponding ticker
-                ticker = cls._find_ticker_for_company(canonical)
-                return canonical, ticker
+            if len(alias) < cls.MIN_SUBSTRING_LENGTH:
+                # Short alias - require word boundary match
+                # Use regex to match as whole word
+                pattern = rf'\b{re.escape(alias)}\b'
+                if re.search(pattern, query_lower):
+                    ticker = cls._find_ticker_for_company(canonical)
+                    return canonical, ticker
+            else:
+                # Longer alias - substring match is acceptable
+                if alias in query_lower:
+                    ticker = cls._find_ticker_for_company(canonical)
+                    return canonical, ticker
 
         # Strategy 2: Check for ticker symbols (uppercase 1-5 letter words)
+        # Must be whole word match
         ticker_pattern = r'\b([A-Z]{1,5})\b'
         potential_tickers = re.findall(ticker_pattern, query.upper())
 
@@ -853,7 +714,12 @@ class CompanyNameValidator:
                 if match:
                     potential_name = match.group(1)
                     for alias, canonical in cls.COMPANY_ALIASES.items():
-                        if potential_name in alias:
+                        # Use word boundary for short names
+                        if len(alias) < cls.MIN_SUBSTRING_LENGTH:
+                            if re.search(rf'\b{re.escape(alias)}\b', potential_name):
+                                ticker = cls._find_ticker_for_company(canonical)
+                                return canonical, ticker
+                        elif potential_name in alias or alias in potential_name:
                             ticker = cls._find_ticker_for_company(canonical)
                             return canonical, ticker
 

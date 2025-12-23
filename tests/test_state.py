@@ -1,9 +1,4 @@
-"""
-Unit tests for state schema definitions.
-
-Tests the Pydantic models used for state management
-in the LangGraph workflow.
-"""
+"""Tests for state schema definitions."""
 
 import pytest
 from datetime import datetime
@@ -55,27 +50,25 @@ class TestResearchFindings:
     """Tests for the ResearchFindings model."""
 
     def test_create_empty_findings(self):
-        """Should create findings with default values."""
         findings = ResearchFindings()
         assert findings.company_name is None
-        assert findings.recent_news is None
+        assert findings.recent_news == []
         assert findings.sources == []
 
     def test_create_full_findings(self):
-        """Should create findings with all fields."""
+        from src.research_assistant.state import NewsItem, StockInfo
         findings = ResearchFindings(
             company_name="Apple Inc.",
-            recent_news="Launched Vision Pro",
-            stock_info="Trading at $195",
-            key_developments="AI integration",
+            recent_news=[NewsItem(title="Launched Vision Pro")],
+            stock_info=StockInfo(price=195.0),
+            key_developments=["AI integration"],
             sources=["mock_data"]
         )
         assert findings.company_name == "Apple Inc."
-        assert findings.recent_news == "Launched Vision Pro"
+        assert len(findings.recent_news) == 1
         assert "mock_data" in findings.sources
 
     def test_raw_data_storage(self):
-        """Should store raw data dictionary."""
         raw = {"key": "value", "nested": {"a": 1}}
         findings = ResearchFindings(raw_data=raw)
         assert findings.raw_data == raw

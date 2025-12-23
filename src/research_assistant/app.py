@@ -501,6 +501,27 @@ class ResearchAssistantApp:
         # Check for interrupts
         interrupt_info = self.check_interrupt(thread_id)
 
+        # Extract data_source - check multiple possible locations
+        data_source = result.get("data_source")
+        if not data_source:
+            # Try to get from research_findings
+            research_findings = result.get("research_findings")
+            if research_findings:
+                if hasattr(research_findings, 'sources') and research_findings.sources:
+                    sources = research_findings.sources
+                    if "tavily_search" in sources or "tavily_api" in sources:
+                        data_source = "tavily_search"
+                    elif "mock_data" in sources:
+                        data_source = "mock_data"
+                    else:
+                        data_source = sources[0] if sources else None
+                elif hasattr(research_findings, 'raw_data') and research_findings.raw_data:
+                    raw_source = research_findings.raw_data.get("source", "")
+                    if "tavily" in str(raw_source).lower():
+                        data_source = "tavily_search"
+                    elif raw_source:
+                        data_source = raw_source
+
         response = {
             "thread_id": thread_id,
             "session_id": session_id,
@@ -511,6 +532,7 @@ class ResearchAssistantApp:
             "detected_company": result.get("detected_company"),
             "workflow_status": result.get("workflow_status", "completed"),
             "interrupted": interrupt_info.get("interrupted", False),
+            "data_source": data_source,
         }
 
         if interrupt_info.get("interrupted"):

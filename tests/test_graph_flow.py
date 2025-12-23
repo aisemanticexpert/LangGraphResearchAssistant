@@ -26,10 +26,9 @@ class TestGraphConstruction:
         assert graph is not None
 
     def test_graph_visualization(self):
-        """Should return mermaid diagram."""
         diagram = get_graph_visualization()
         assert "mermaid" in diagram
-        assert "clarity" in diagram.lower()
+        assert "thinksemantic" in diagram.lower()
         assert "research" in diagram.lower()
         assert "validator" in diagram.lower()
         assert "synthesis" in diagram.lower()

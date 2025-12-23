@@ -1,22 +1,5 @@
 """
-Clarity Agent for the Research Assistant
-=========================================
-
-The Clarity Agent is the first node in the LangGraph workflow, responsible for:
-    1. Validating query safety via guardrails
-    2. Analyzing query clarity and specificity
-    3. Extracting company names and ticker symbols
-    4. Classifying query intent accurately
-    5. Triggering human-in-the-loop for unclear queries
-
-This agent uses LLM for intelligent intent classification to handle
-nuanced queries like "Tesla owner" vs "Tesla stock price".
-
-Routing Logic:
-    - clarity_status == "clear" -> Research Agent
-    - clarity_status == "needs_clarification" -> Human Interrupt
-
-Author: Rajesh Gupta
+Clarity agent for query validation and intent classification (legacy).
 """
 
 import re

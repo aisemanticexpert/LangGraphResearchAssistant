@@ -1,30 +1,5 @@
 """
-Validator Agent for the Research Assistant
-===========================================
-
-The Validator Agent acts as a quality gate, responsible for:
-    1. Reviewing research findings quality
-    2. Assessing data completeness
-    3. Evaluating query relevance
-    4. Providing feedback for improvement
-    5. Controlling the retry loop (max 3 attempts)
-
-This agent implements a multi-criteria weighted assessment to determine
-if research is sufficient for synthesis.
-
-Routing Logic:
-    - validation_result == "sufficient" -> Synthesis Agent
-    - validation_result == "insufficient" AND attempts < 3 -> Research Agent
-    - validation_result == "insufficient" AND attempts >= 3 -> Synthesis Agent
-
-Assessment Criteria (with weights):
-    - Confidence Score: 30%
-    - Data Completeness: 25%
-    - Query Relevance: 20%
-    - News Coverage: 15%
-    - Financial Data: 10%
-
-Author: Rajesh Gupta
+Validator agent for research quality assessment.
 """
 
 import logging

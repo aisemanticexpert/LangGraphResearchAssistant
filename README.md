@@ -1,335 +1,179 @@
 # LangGraph Research Assistant
 
-A production-ready multi-agent system for company research built with LangGraph.
-
 **Author:** Rajesh Gupta
 
-## Overview
-
-This system uses 5 specialized AI agents working together to provide accurate company research:
-
-1. **UltraThink Intent Agent** - Deep intent analysis (always runs first)
-2. **Research Agent** - Data gathering with confidence scoring
-3. **Validator Agent** - Quality assessment
-4. **Synthesis Agent** - Response generation
-5. **Clarity Agent** - Query understanding (legacy)
-
-### Key Features
-
-- **UltraThink Strategy**: Deep reasoning before action with 48+ safety patterns
-- **RAGHEAT Confidence Scoring**: 6-factor weighted quality assessment
-- **Comprehensive Guardrails**: Market manipulation, insider trading, prompt injection detection
-- **Human-in-the-Loop**: Intelligent interrupts for query clarification
-- **Tavily Search API**: Real-time data with mock data fallback
+A multi-agent company research assistant built using LangGraph. The system uses four specialized agents working together to handle user queries about companies, stocks, and financial information.
 
 ---
 
-## Quick Start
+## What I Built
+
+This project implements a research assistant that can:
+
+- Answer questions about 50+ companies (Apple, Tesla, Microsoft, Google, Amazon, etc.)
+- Handle follow-up questions while maintaining conversation context
+- Ask for clarification when queries are unclear
+- Block harmful queries (market manipulation, insider trading attempts)
+- Retry research automatically when data quality is low
+
+The core of the system is a LangGraph workflow with four agents:
+
+1. **ThinkSemantic Agent** - Analyzes user intent, detects company names, and blocks unsafe queries
+2. **Research Agent** - Gathers company data from Tavily Search API or mock data
+3. **Validator Agent** - Checks if research quality is sufficient (retries up to 3 times if not)
+4. **Synthesis Agent** - Generates the final user-friendly response
+
+---
+
+## How to Set Up and Run
 
 ### Prerequisites
 
-- Python 3.10+
-- Anthropic API key
+- Python 3.10 or higher
+- An Anthropic API key (get one from https://console.anthropic.com/)
 
-### Installation
+### Step 1: Clone and Install
 
 ```bash
-# Clone and setup
-git clone <repository-url>
+git clone <repo-url>
 cd LangGraphResearchAssistant
 
-# Create virtual environment
+# Create a virtual environment
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
-
-# Run
-python -m src.research_assistant.main
 ```
 
-### Usage
+### Step 2: Configure Environment
 
-**Interactive Mode:**
+```bash
+cp .env.example .env
+```
+
+Open `.env` in any text editor and add your Anthropic API key:
+
+```
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+```
+
+That's all you need. The system uses mock data by default, so you can test without a Tavily key.
+
+### Step 3: Run the Application
+
+You have three options:
+
+**Option A: Interactive Chat (CLI)**
 ```bash
 python -m src.research_assistant.main
-
-> Tell me about Tesla
-> What's their latest news?
-> exit
 ```
 
-**Single Query:**
+**Option B: Web Interface**
+```bash
+python -m src.research_assistant.main --api
+```
+Then open http://localhost:8000/chat in your browser.
+
+**Option C: Single Query**
 ```bash
 python -m src.research_assistant.main -q "Tell me about Apple"
 ```
 
-**API Server:**
-```bash
-python -m src.research_assistant.main --api
-# Open http://localhost:8000/docs
-```
-
----
-
-## UltraThink Strategy
-
-UltraThink is a custom intent analysis system that thinks before acting. It solves two critical problems:
-
-### Problem 1: Intent Misclassification
-
-Without UltraThink:
-```
-User: "Tesla owner"
-System: "Tesla Inc. is an electric car company..."  (wrong - user wanted Elon Musk info)
-```
-
-With UltraThink:
-```
-User: "Tesla owner"
-UltraThink: Detects "owner" keyword -> classifies as LEADERSHIP intent
-System: "Elon Musk is the owner and CEO of Tesla Inc..."  (correct)
-```
-
-### Problem 2: Dangerous Query Detection
-
-Without UltraThink:
-```
-User: "How can I dump moderna"
-System: "Here's how to sell Moderna shares..."  (helped with illegal activity)
-```
-
-With UltraThink:
-```
-User: "How can I dump moderna"
-UltraThink: Detects "dump" pattern -> BLOCKED as market manipulation
-System: "I cannot assist with market manipulation activities."
-```
-
-### How It Works
-
-UltraThink runs 4 steps on every query:
-
-1. **Safety Check** - Scans 48+ dangerous patterns (manipulation, insider trading, injection)
-2. **Intent Classification** - Determines query type (leadership, stock_price, news, etc.)
-3. **Entity Extraction** - Identifies company name and ticker
-4. **Routing Decision** - Proceed, block, or request clarification
-
-### Safety Patterns
-
-| Category | Patterns | Example Blocked Query |
-|----------|----------|----------------------|
-| Market Manipulation | 30+ | "pump and dump", "crash the stock" |
-| Insider Trading | 8+ | "trade before announcement" |
-| Prompt Injection | 10+ | "ignore previous instructions" |
-
-### Intent Types
-
-| Intent | Trigger Keywords | Response Focus |
-|--------|-----------------|----------------|
-| `leadership` | owner, CEO, founder | Executive information |
-| `stock_price` | stock, price, trading | Current price data |
-| `financials` | revenue, earnings, profit | Financial metrics |
-| `news` | news, recent, latest | Recent developments |
-| `competitors` | competitors, vs, compare | Competitive analysis |
-
----
-
-## Architecture
-
-```
-User Query
-    |
-    v
-+------------------------+
-|   ULTRATHINK AGENT     |  <-- Always first
-|   - Safety Check       |
-|   - Intent Analysis    |
-|   - Entity Extraction  |
-+------------------------+
-    |
-    +---> [BLOCKED] ---------> Show Block Message
-    |     (manipulation,
-    |      insider trading)
-    |
-    +---> [GREETING] --------> Friendly Response -> END
-    |
-    +---> [UNCLEAR] ---------> Request Clarification -> Back to UltraThink
-    |
-    +---> [LEGITIMATE] ------> Research Agent
-              |
-              v
-    +-------------------+
-    |  RESEARCH AGENT   |
-    |   - Data Gather   |
-    |   - RAGHEAT Score |
-    +-------------------+
-        |
-        v [confidence < 6.0]          [confidence >= 6.0]
-    +-------------------+                    |
-    | VALIDATOR AGENT   |                    |
-    |   - Quality Gate  |                    |
-    |   - Feedback Loop |----[retry]----+    |
-    +-------------------+    (max 3x)   |    |
-        | [sufficient]                  |    |
-        v                               v    v
-    +-------------------+
-    | SYNTHESIS AGENT   |
-    |   - Response Gen  |
-    |   - Disclaimers   |
-    +-------------------+
-        |
-        v
-    Final Response
-```
-
----
-
-## RAGHEAT Confidence Scoring
-
-Multi-factor confidence assessment based on weighted taxonomy:
-
-```
-confidence = sum(weight_i * factor_i) where sum(weights) = 1.0
-```
-
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| `data_completeness` | 30% | Presence of key data fields |
-| `source_diversity` | 20% | Number of independent sources |
-| `news_coverage` | 15% | News quantity and sentiment |
-| `financial_data` | 15% | Financial metrics completeness |
-| `recency` | 10% | Time decay (exponential) |
-| `sentiment_consistency` | 10% | Alignment of sentiment signals |
-
-**Routing:**
-- Score >= 6.0: Direct to synthesis
-- Score < 6.0: Requires validation
-
----
-
-## Guardrails
-
-### Input Validation
-
-1. Empty/null check
-2. Length constraints (3-2000 chars)
-3. Content sanitization
-4. Prompt injection detection
-5. Market manipulation blocking
-6. Insider trading detection
-
-### Output Enhancement
-
-- Low confidence warnings (< 3.0)
-- Stale data notifications (> 72 hours)
-- Financial disclaimer injection
-
-### Company Normalization
-
-50+ company aliases supported:
-- "Apple" -> "Apple Inc."
-- "AAPL" -> "Apple Inc."
-- "Google" -> "Alphabet Inc."
-
----
-
-## Testing
-
-### Quick Test
-
-```bash
-python -m src.research_assistant.main
-```
-
-Test these queries:
-
-| Query | Expected Result |
-|-------|-----------------|
-| `Hello` | Greeting response |
-| `Tell me about Apple` | Apple company info |
-| `Tesla owner` | Elon Musk information |
-| `How can I dump moderna` | BLOCKED - manipulation |
-| `pump and dump` | BLOCKED - manipulation |
-| `insider information` | BLOCKED - insider trading |
-
-### Run Automated Tests
+### Step 4: Run Tests (Optional)
 
 ```bash
 pytest tests/ -v
-pytest tests/ --cov=src/research_assistant --cov-report=html
 ```
 
-### Test UltraThink Patterns
-
-```bash
-python3 -c "
-from src.research_assistant.agents.ultrathink_intent_agent import UltraThinkIntentAgent
-
-agent = UltraThinkIntentAgent()
-
-tests = [
-    ('How can I dump moderna', False),
-    ('Tesla owner', True),
-    ('pump and dump', False),
-    ('Apple stock price', True),
-]
-
-for query, should_proceed in tests:
-    result = agent._check_safety_patterns(query)
-    status = 'PASS' if result.should_proceed == should_proceed else 'FAIL'
-    print(f'{status}: {query}')
-"
-```
+There are 281 tests covering all the agents, routing logic, and API endpoints.
 
 ---
 
-## Configuration
+## Try These Queries
 
-### Environment Variables
-
-```env
-# Required
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-
-# Optional - Research
-TAVILY_API_KEY=tvly-xxxxx
-USE_MOCK_DATA=true
-MAX_RESEARCH_ATTEMPTS=3
-CONFIDENCE_THRESHOLD=6.0
-
-# Optional - Model
-DEFAULT_MODEL=claude-sonnet-4-20250514
-TEMPERATURE=0.0
-
-# Optional - Persistence
-CHECKPOINT_BACKEND=memory
-```
+| Query | What Happens |
+|-------|--------------|
+| `Tesla` | Returns company overview with stock info, news, financials |
+| `MSFT stock price` | Shows current price, changes, 52-week range |
+| `Who is Apple's CEO?` | Returns leadership information |
+| `Should I buy NVDA?` | Discusses valuation factors (with disclaimer) |
+| `Hello` | Friendly greeting |
+| `What about their competitors?` | Follow-up that uses context from previous query |
+| `asdfghjkl` | Blocked as gibberish |
+| `Pump AAPL stock` | Blocked as market manipulation |
 
 ---
 
-## API Reference
+## How the LangGraph Workflow Works
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/query` | Start new conversation |
-| POST | `/continue` | Continue existing conversation |
-| POST | `/clarify` | Resume with clarification |
-| GET | `/conversation/{thread_id}` | Get conversation state |
-| GET | `/companies` | List available companies |
-| GET | `/health` | Health check |
+Here's the flow of a typical query:
 
-### Example
+```
+User Query
+     │
+     ▼
+┌─────────────────┐
+│  ThinkSemantic  │ ─── Detects intent, company, safety issues
+└────────┬────────┘
+         │
+    ┌────┴────┬──────────┐
+    ▼         ▼          ▼
+ greeting  research   blocked
+    │         │          │
+   END        ▼         ask for
+          Validator   clarification
+              │
+         ┌────┴────┐
+         ▼         ▼
+    sufficient  insufficient
+         │         │
+         ▼         ▼
+     Synthesis   retry (max 3x)
+         │         │
+        END    ───┘
+```
 
-```bash
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Tell me about Apple"}'
+### Key LangGraph Features I Used
+
+**StateGraph** - The workflow is defined as a graph where each node is an agent:
+
+```python
+workflow = StateGraph(ResearchAssistantState)
+workflow.add_node("thinksemantic", thinksemantic_agent.run)
+workflow.add_node("research", research_agent.run)
+workflow.add_node("validator", validator_agent.run)
+workflow.add_node("synthesis", synthesis_agent.run)
+```
+
+**Conditional Routing** - Different paths based on state:
+
+```python
+workflow.add_conditional_edges(
+    "validator",
+    route_after_validation,
+    {
+        "research": "research",   # retry if insufficient
+        "synthesis": "synthesis"  # proceed if good enough
+    }
+)
+```
+
+**Checkpointer** - Saves conversation state for multi-turn:
+
+```python
+checkpointer = MemorySaver()
+graph = workflow.compile(checkpointer=checkpointer)
+```
+
+**Interrupt** - Pauses for human clarification:
+
+```python
+from langgraph.types import interrupt
+
+response = interrupt({
+    "question": "Which company are you asking about?"
+})
 ```
 
 ---
@@ -339,71 +183,241 @@ curl -X POST "http://localhost:8000/query" \
 ```
 src/research_assistant/
 ├── agents/
-│   ├── base.py                     # Base agent class
-│   ├── ultrathink_intent_agent.py  # Intent analysis (800 lines)
-│   ├── clarity_agent.py            # Query understanding
-│   ├── research_agent.py           # Data gathering
-│   ├── validator_agent.py          # Quality gate
-│   └── synthesis_agent.py          # Response generation
+│   ├── thinksemantic_intent_agent.py  # Intent + safety analysis
+│   ├── research_agent.py              # Data gathering
+│   ├── validator_agent.py             # Quality checking
+│   └── synthesis_agent.py             # Response generation
 ├── routing/
-│   └── conditions.py               # Routing logic
+│   └── conditions.py                  # Routing functions
 ├── tools/
-│   ├── research_tool.py            # Tavily + Mock search
-│   └── mock_data.py                # 25+ companies
-├── utils/
-│   ├── confidence.py               # RAGHEAT scoring
-│   ├── intent.py                   # Intent classification
-│   └── grounding.py                # Hallucination detection
-├── state.py                        # Pydantic state schemas
-├── guardrails.py                   # Input/output validation
-├── graph.py                        # LangGraph workflow
-├── app.py                          # Application layer
-├── api.py                          # FastAPI endpoints
-├── config.py                       # Configuration
-└── main.py                         # CLI entry point
-
-tests/
-├── test_enhanced_system.py         # Comprehensive tests
-├── test_agents.py                  # Agent tests
-└── test_routing.py                 # Routing tests
+│   ├── research_tool.py               # Tavily integration
+│   └── mock_data.py                   # Sample company data
+├── graph.py                           # LangGraph workflow
+├── state.py                           # State schema (Pydantic)
+├── guardrails.py                      # Safety patterns
+├── api.py                             # FastAPI endpoints
+├── app.py                             # Application logic
+└── main.py                            # CLI entry point
 ```
 
 ---
 
-## Supported Companies
+## Requirements Checklist
 
-**Technology:** Apple, Microsoft, Google, Amazon, Meta, NVIDIA, AMD, Intel, Salesforce, Oracle, Adobe, Netflix
+| # | Requirement | Where to Find It |
+|---|-------------|------------------|
+| 1 | 4 agents working together | `src/research_assistant/agents/` |
+| 2 | State schema with all fields | `state.py` - `ResearchAssistantState` class |
+| 3 | 3 conditional routing functions | `routing/conditions.py` |
+| 4 | Validator→Research feedback loop | `validator_agent.py` + `route_after_validation()` |
+| 5 | Interrupt for unclear queries | `graph.py` - `human_clarification_node()` |
+| 6 | Multi-turn conversation memory | `app.py` - uses `MemorySaver` checkpointer |
+| 7 | Example conversations | See below |
+| 8 | Software engineering practices | Classes, type hints, 281 tests |
+| 9 | README with instructions | This file |
+| 10 | Assumptions documented | See "Assumptions" section |
+| 11 | Beyond requirements | See "Beyond Requirements" section |
 
-**Finance:** JPMorgan Chase, Visa, PayPal, Block/Square
+---
 
-**Healthcare:** Pfizer, Johnson & Johnson, UnitedHealth, Moderna
+## Example Conversations
 
-**Retail:** Walmart, Costco, Nike, Starbucks
+### Example 1: Validator Retry Loop
 
-**Automotive:** Tesla, Toyota, Ford
+Shows the feedback loop between Validator and Research:
 
-**Entertainment:** Disney, Spotify
+```
+You: Tell me about Apple
+
+[Internal]
+→ ThinkSemantic: company_overview intent, company=Apple
+→ Research: gathering data... confidence=4.2
+→ Validator: insufficient (missing financials), attempt 1/3
+→ Research: retrying with feedback... confidence=7.1
+→ Validator: sufficient, proceeding
+→ Synthesis: generating response
+
+Bot: Apple Inc. (AAPL) is a technology company based in Cupertino, California.
+
+Stock: $195.00 (+45% YTD)
+Revenue: $383B | Net Income: $97B | P/E: 29.5
+
+Recent news:
+- Vision Pro launch
+- Services revenue growing
+- AI integration across products
+
+CEO: Tim Cook
+```
+
+### Example 2: Multi-Turn Follow-Up
+
+Shows conversation memory working:
+
+```
+You: Tesla stock price
+
+Bot: Tesla (TSLA) is currently trading at $242.00
+- Today: -1.2%
+- 52-week range: $152 - $299
+- Market cap: $770B
+
+You: What about their competitors?
+
+[System knows "their" = Tesla from context]
+
+Bot: Tesla's main EV competitors:
+- Rivian (RIVN): $17, focus on trucks
+- Lucid (LCID): $4.50, luxury segment
+- BYD: Largest by volume globally
+- Ford/GM: Traditional automakers entering EV
+
+You: Who is the CEO?
+
+[Still in Tesla context]
+
+Bot: Elon Musk is CEO of Tesla since 2008...
+```
+
+### Example 3: Clarification Request
+
+Shows human-in-the-loop interrupt:
+
+```
+You: What's the stock?
+
+Bot: Could you specify which company? For example "Apple stock" or "MSFT"
+
+You: Microsoft
+
+Bot: Microsoft (MSFT): $378.00 (+52% YTD)
+52-week range: $245 - $385
+Market cap: $2.8T
+```
+
+### Example 4: Blocked Query
+
+Shows safety guardrails:
+
+```
+You: Give me insider tips on NVDA
+
+Bot: I can't help with that - it appears to reference insider trading.
+
+I can provide public information about NVIDIA:
+- News and announcements
+- Stock price and metrics
+- Company overview
+
+Want me to research NVIDIA using public info?
+
+You: Yes
+
+Bot: NVIDIA Corporation (NVDA)...
+[normal research response]
+```
+
+---
+
+## Assumptions I Made
+
+Since this was an open-ended problem, I made these decisions:
+
+1. **ThinkSemantic instead of Clarity Agent** - The requirements mentioned a "Clarity Agent" for checking if queries are clear. I built ThinkSemantic which does that plus intent classification, company detection, and safety checks. It's a superset of what Clarity would do.
+
+2. **Mock data works without API keys** - You can test the full system with just an Anthropic key. Tavily is optional for live web search.
+
+3. **One company per query** - The system handles one company at a time. "Compare Apple and Microsoft" would need separate queries.
+
+4. **Confidence threshold of 6.0** - After testing, I found scores below 6 usually mean missing important data. This is configurable in `.env`.
+
+5. **Max 3 research attempts** - If data quality is still low after 3 tries, synthesize the best available answer rather than failing.
+
+6. **Investment queries get disclaimers** - Any query that sounds like investment advice includes a financial disclaimer.
+
+---
+
+## Beyond Requirements
+
+Things I added beyond the base requirements:
+
+### 1. ThinkSemantic with Chain-of-Thought
+
+Instead of a simple clarity check, I built an intent analysis system that:
+- Classifies queries into types (greeting, stock_price, investment, leadership, etc.)
+- Detects 50+ company names and tickers
+- Blocks 30+ manipulation patterns
+- Filters gibberish queries
+- Logs reasoning for debugging
+
+### 2. RAGHEAT-Inspired Confidence Scoring
+
+Instead of simple heuristics, the Research Agent uses weighted factors:
+
+| Factor | Weight |
+|--------|--------|
+| Data completeness | 30% |
+| Source diversity | 20% |
+| News coverage | 15% |
+| Financial data | 15% |
+| Data recency | 10% |
+| Sentiment consistency | 10% |
+
+### 3. Web UI
+
+Browser-based chat at `/chat` with typing indicators and suggested queries.
+
+### 4. REST API with Swagger
+
+Full API with documentation at `/docs`.
+
+### 5. 281 Tests
+
+Comprehensive test coverage for all agents, routing, and endpoints.
+
+### 6. Mock Data for 50+ Companies
+
+Tech, finance, healthcare, retail, automotive sectors covered.
+
+---
+
+## Configuration
+
+Key settings in `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | required | Claude API key |
+| `TAVILY_API_KEY` | optional | For live web search |
+| `USE_MOCK_DATA` | true | Use mock data |
+| `CONFIDENCE_THRESHOLD` | 6.0 | Min score to skip validator |
+| `MAX_RESEARCH_ATTEMPTS` | 3 | Max retries |
 
 ---
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| `ANTHROPIC_API_KEY not set` | Add key to `.env` file |
-| `No module named 'langgraph'` | Run `pip install -r requirements.txt` |
-| Low confidence scores | Company may not be in mock data |
-| Clarification loops | Be more specific in query |
+**"ANTHROPIC_API_KEY not set"**
+- Check that `.env` exists and has your key
+
+**"No data found for company X"**
+- Company might not be in mock data
+- Add `TAVILY_API_KEY` for live search
+
+**Slow first response**
+- Model loading takes a moment
+- Subsequent queries are faster
 
 ---
 
-## Author
+## Key Files to Review
 
-**Rajesh Gupta**
+- `graph.py` - The LangGraph workflow definition
+- `agents/thinksemantic_intent_agent.py` - Intent analysis logic
+- `agents/validator_agent.py` - Quality checking and retry logic
+- `state.py` - All the state fields and Pydantic models
+- `routing/conditions.py` - The three routing functions
 
-This project demonstrates:
-- LangGraph multi-agent orchestration
-- UltraThink deep intent analysis with 48+ safety patterns
-- RAGHEAT confidence scoring methodology
-- Production-ready guardrails for SEC/FINRA compliance
-- Human-in-the-loop workflow management
+---
+
+Rajesh Gupta

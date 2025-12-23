@@ -1,35 +1,6 @@
 """
-UltraThink Intent Analyzer Agent
-=================================
-
-This is the FIRST agent in the workflow that deeply analyzes user intent
-BEFORE any action is taken. It uses chain-of-thought reasoning to:
-
-1. Understand the TRUE intent behind the query
-2. Detect manipulation, harmful, or off-topic requests
-3. Classify the query into actionable categories
-4. Determine the appropriate response strategy
-
-UltraThink Philosophy:
-    - THINK FIRST, ACT LATER
-    - Deep reasoning prevents misclassification
-    - Multi-dimensional analysis catches edge cases
-    - Explicit reasoning chain is logged for auditability
-
-Intent Categories:
-    - LEGITIMATE_RESEARCH: Valid company/financial research
-    - MANIPULATION: Market manipulation attempts (30+ patterns)
-    - INSIDER_TRADING: Illegal insider trading queries (8+ patterns)
-    - HARMFUL: Harmful or illegal requests (10+ patterns)
-    - OFF_TOPIC: Non-research queries
-    - UNCLEAR: Ambiguous queries needing clarification
-    - GREETING: Social interactions
-
-This is a BEYOND REQUIREMENTS feature designed and implemented by Rajesh Gupta
-to solve the problem of intent misclassification and safety in AI systems.
-
-Developer: Rajesh Gupta
-Copyright (c) 2024 Rajesh Gupta. All rights reserved.
+ThinkSemantic Intent Analyzer - First stage agent for intent classification
+and safety validation before research execution.
 """
 
 import re
@@ -78,67 +49,25 @@ class ResearchIntent(str, Enum):
 
 
 @dataclass
-class UltraThinkResult:
-    """
-    Result of UltraThink deep intent analysis.
-
-    Contains the full reasoning chain and classification.
-    """
-    # Primary classification
+class ThinkSemanticResult:
+    """Result container for intent analysis."""
     intent_category: IntentCategory
     research_intent: Optional[ResearchIntent] = None
-
-    # Confidence and reasoning
     confidence: float = 0.0
     reasoning_chain: List[str] = field(default_factory=list)
-
-    # Detected entities
     detected_company: Optional[str] = None
     detected_ticker: Optional[str] = None
-
-    # Action decision
     should_proceed: bool = False
     block_reason: Optional[str] = None
     clarification_needed: Optional[str] = None
-
-    # Metadata
     analysis_time_ms: float = 0.0
     llm_used: bool = False
 
 
-class UltraThinkIntentAgent(BaseAgent):
-    """
-    UltraThink Intent Analyzer - Deep reasoning before action.
+class ThinkSemanticIntentAgent(BaseAgent):
+    """Intent analysis agent with safety checks and entity extraction."""
 
-    This agent implements a multi-stage analysis pipeline:
-
-    Stage 1: SAFETY CHECK
-        - Prompt injection detection
-        - Market manipulation patterns
-        - Insider trading patterns
-        - Harmful content detection
-
-    Stage 2: INTENT CLASSIFICATION
-        - Chain-of-thought reasoning
-        - Multi-dimensional analysis
-        - Context consideration
-
-    Stage 3: ENTITY EXTRACTION
-        - Company name detection
-        - Ticker symbol extraction
-        - Alias resolution
-
-    Stage 4: DECISION MAKING
-        - Should we proceed?
-        - What specific action?
-        - Any clarification needed?
-
-    The agent NEVER takes action without completing analysis.
-    """
-
-    # Dangerous patterns that MUST be blocked
     MANIPULATION_PATTERNS = [
-        # Classic manipulation schemes
         (r"pump\s+and\s+dump", "pump and dump scheme"),
         (r"short\s+and\s+distort", "short and distort scheme"),
         (r"manipulate\s+(the\s+)?(stock|market|price)", "market manipulation"),
@@ -241,11 +170,19 @@ class UltraThinkIntentAgent(BaseAgent):
         ],
         ResearchIntent.INVESTMENT_RESEARCH: [
             r"\b(should\s+i\s+)?(buy|sell|invest)\b",
+            r"\bbest\s+(price|time)\s+to\s+(buy|sell|invest)\b",
+            r"\bgood\s+(price|time|entry)\b",
+            r"\bentry\s+point\b",
+            r"\bworth\s+(buying|investing)\b",
+            r"\b(over|under)valued\b",
+            r"\bfair\s+value\b",
+            r"\bprice\s+target\b",
             r"\binvestment\b",
             r"\banalyst\s+ratings?\b",
             r"\brecommendations?\b",
             r"\boutlook\b",
             r"\bforecast\b",
+            r"\bhold\s+or\s+(sell|buy)\b",
         ],
         ResearchIntent.PRODUCTS_SERVICES: [
             r"\bproducts?\b",
@@ -276,7 +213,38 @@ class UltraThinkIntentAgent(BaseAgent):
         r"^(thanks?|thank\s+you)[\s!.,]*$",
         r"^hi\s+there[\s!.,]*$",
         r"^hey\s+there[\s!.,]*$",
+        r"^who\s+are\s+you[\s?!]*$",
+        r"^what\s+are\s+you[\s?!]*$",
+        r"^what\s+can\s+you\s+do[\s?!]*$",
+        r"^(tell\s+me\s+)?about\s+(yourself|you)[\s?!]*$",
+        r"^help[\s?!]*$",
     ]
+
+    # Minimum requirements for a valid query
+    MIN_MEANINGFUL_WORD_LENGTH = 2  # Minimum word length for meaningful content
+    MIN_ALPHA_RATIO = 0.5  # At least 50% alphabetic characters
+    MIN_UNIQUE_CHARS = 3  # Minimum unique characters for meaningful content
+
+    # Patterns indicating gibberish or meaningless input
+    GIBBERISH_PATTERNS = [
+        r"^[a-z]{1,2}$",  # Single or double letters
+        r"^(.)\1{2,}$",  # Repeated single character (aaa, bbb, etc.)
+        r"^[^a-zA-Z0-9\s]+$",  # Only special characters
+        r"^[\d]+$",  # Only numbers (without context)
+        r"^[bcdfghjklmnpqrstvwxyz]{4,}$",  # Only consonants (likely gibberish)
+        r"^[aeiou]{4,}$",  # Only vowels (likely gibberish)
+    ]
+
+    # Common English words that indicate meaningful query (finance-focused)
+    MEANINGFUL_INDICATORS = {
+        "what", "who", "how", "why", "when", "where", "which",
+        "tell", "show", "find", "get", "give", "about", "explain",
+        "stock", "price", "news", "ceo", "owner", "company", "corp",
+        "revenue", "profit", "earnings", "market", "finance", "financial",
+        "latest", "recent", "current", "today", "now", "yesterday",
+        "buy", "sell", "invest", "trading", "share", "shares",
+        "analysis", "analyze", "compare", "vs", "versus", "competitor"
+    }
 
     def __init__(
         self,
@@ -285,7 +253,7 @@ class UltraThinkIntentAgent(BaseAgent):
         guardrail_config: Optional[GuardrailConfig] = None,
         audit_logger: Optional[AuditLogger] = None
     ):
-        """Initialize the UltraThink Intent Analyzer."""
+        """Initialize the ThinkSemantic Intent Analyzer."""
         super().__init__(model_name=model_name, temperature=temperature)
 
         self.config = guardrail_config or GuardrailConfig()
@@ -316,14 +284,17 @@ class UltraThinkIntentAgent(BaseAgent):
         self._greeting_regex = [
             re.compile(p, re.IGNORECASE) for p in self.GREETING_PATTERNS
         ]
+        self._gibberish_regex = [
+            re.compile(p, re.IGNORECASE) for p in self.GIBBERISH_PATTERNS
+        ]
 
     @property
     def name(self) -> str:
-        return "UltraThinkIntentAgent"
+        return "ThinkSemanticIntentAgent"
 
     @property
     def system_prompt(self) -> str:
-        return """You are an UltraThink Intent Analyzer. Your job is to DEEPLY analyze user queries
+        return """You are a ThinkSemantic Intent Analyzer. Your job is to DEEPLY analyze user queries
 before any action is taken. You must think step-by-step and provide explicit reasoning.
 
 CRITICAL ANALYSIS FRAMEWORK:
@@ -353,7 +324,7 @@ CRITICAL ANALYSIS FRAMEWORK:
    - GREET: Social interaction, respond friendly
 
 RESPOND ONLY WITH JSON:
-{
+{{
     "reasoning_chain": [
         "Step 1: [Your first observation]",
         "Step 2: [Your second observation]",
@@ -367,7 +338,7 @@ RESPOND ONLY WITH JSON:
     "should_proceed": true,
     "block_reason": "Reason if blocked, null if proceeding",
     "clarification_needed": "Question to ask if unclear, null otherwise"
-}
+}}
 
 IMPORTANT RULES:
 - ALWAYS think through the reasoning chain first
@@ -378,7 +349,7 @@ IMPORTANT RULES:
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute UltraThink deep intent analysis.
+        Execute ThinkSemantic deep intent analysis.
 
         This is the FIRST node in the workflow. It thoroughly analyzes
         the query before any action is taken.
@@ -393,7 +364,7 @@ IMPORTANT RULES:
         user_query = state.get("user_query", "")
         messages = state.get("messages", [])
 
-        self._log_execution("Starting UltraThink analysis", {"query": user_query[:100]})
+        self._log_execution("Starting ThinkSemantic analysis", {"query": user_query[:100]})
 
         # Stage 1: Pattern-based safety check (fast, no LLM needed)
         safety_result = self._check_safety_patterns(user_query)
@@ -401,6 +372,14 @@ IMPORTANT RULES:
         if not safety_result.should_proceed:
             # Blocked by pattern matching - don't proceed
             return self._build_blocked_response(state, safety_result, start_time)
+
+        # Handle greeting immediately without LLM
+        if safety_result.intent_category == IntentCategory.GREETING:
+            return self._build_response(state, safety_result, start_time)
+
+        # If company was detected in safety check, use that result (skip LLM)
+        if safety_result.detected_company:
+            return self._build_response(state, safety_result, start_time)
 
         # Stage 2: Deep LLM analysis for intent classification
         llm_result = self._deep_llm_analysis(user_query, messages, state)
@@ -427,7 +406,7 @@ IMPORTANT RULES:
         # Build response based on result
         return self._build_response(state, result, start_time)
 
-    def _check_safety_patterns(self, query: str) -> UltraThinkResult:
+    def _check_safety_patterns(self, query: str) -> ThinkSemanticResult:
         """
         Fast pattern-based safety check.
 
@@ -439,7 +418,7 @@ IMPORTANT RULES:
         for pattern, desc in self._manipulation_regex:
             if pattern.search(query):
                 reasoning.append(f"BLOCKED: Detected market manipulation pattern - {desc}")
-                return UltraThinkResult(
+                return ThinkSemanticResult(
                     intent_category=IntentCategory.MANIPULATION,
                     confidence=1.0,
                     reasoning_chain=reasoning,
@@ -451,7 +430,7 @@ IMPORTANT RULES:
         for pattern, desc in self._insider_regex:
             if pattern.search(query):
                 reasoning.append(f"BLOCKED: Detected insider trading pattern - {desc}")
-                return UltraThinkResult(
+                return ThinkSemanticResult(
                     intent_category=IntentCategory.INSIDER_TRADING,
                     confidence=1.0,
                     reasoning_chain=reasoning,
@@ -463,7 +442,7 @@ IMPORTANT RULES:
         for pattern, desc in self._injection_regex:
             if pattern.search(query):
                 reasoning.append(f"BLOCKED: Detected prompt injection - {desc}")
-                return UltraThinkResult(
+                return ThinkSemanticResult(
                     intent_category=IntentCategory.HARMFUL,
                     confidence=1.0,
                     reasoning_chain=reasoning,
@@ -475,18 +454,139 @@ IMPORTANT RULES:
         for pattern in self._greeting_regex:
             if pattern.match(query.strip()):
                 reasoning.append("Detected greeting/social interaction")
-                return UltraThinkResult(
+                return ThinkSemanticResult(
                     intent_category=IntentCategory.GREETING,
                     confidence=1.0,
                     reasoning_chain=reasoning,
                     should_proceed=True
                 )
 
+        # Check for gibberish/meaningless input OR detect company
+        meaningfulness_result = self._check_query_meaningfulness(query)
+        if not meaningfulness_result.should_proceed:
+            return meaningfulness_result
+
+        # If company was detected, return that result directly (skip LLM)
+        if meaningfulness_result.detected_company:
+            return meaningfulness_result
+
         # Passed safety checks
         reasoning.append("Query passed initial safety screening")
-        return UltraThinkResult(
+        return ThinkSemanticResult(
             intent_category=IntentCategory.LEGITIMATE_RESEARCH,
             confidence=0.5,  # Need further analysis
+            reasoning_chain=reasoning,
+            should_proceed=True
+        )
+
+    def _check_query_meaningfulness(self, query: str) -> ThinkSemanticResult:
+        """
+        Check if query is meaningful and not gibberish.
+
+        This prevents processing of random strings like 'bbbbb', 'asdfgh', etc.
+        A meaningful query should:
+        - Have a minimum number of unique characters
+        - Contain recognizable words or patterns
+        - Not match known gibberish patterns
+        - Have a reasonable alphabetic ratio
+        """
+        reasoning = []
+        query_clean = query.strip().lower()
+        words = query_clean.split()
+
+        # Check 1: If query is a company name or ticker, immediately proceed
+        from ..guardrails import CompanyNameValidator
+        company, ticker = CompanyNameValidator.normalize_company_name(query_clean)
+        if company:
+            reasoning.append(f"Detected company: {company} ({ticker})")
+            return ThinkSemanticResult(
+                intent_category=IntentCategory.LEGITIMATE_RESEARCH,
+                research_intent=ResearchIntent.COMPANY_OVERVIEW,
+                confidence=0.95,
+                reasoning_chain=reasoning,
+                detected_company=company,
+                detected_ticker=ticker,
+                should_proceed=True
+            )
+
+        # Check 2: Very short queries that are not companies
+        if len(words) == 1 and len(query_clean) < 10:
+            # Check if it matches gibberish patterns
+            for pattern in self._gibberish_regex:
+                if pattern.match(query_clean):
+                    reasoning.append(f"Query '{query_clean}' matches gibberish pattern")
+                    return ThinkSemanticResult(
+                        intent_category=IntentCategory.UNCLEAR,
+                        confidence=0.9,
+                        reasoning_chain=reasoning,
+                        should_proceed=False,
+                        clarification_needed="I didn't understand your request. Could you please ask a specific question about a company? For example: 'Tell me about Apple' or 'What is Tesla's stock price?'"
+                    )
+
+        # Check 2: Unique character ratio (detect repeated characters like 'aaaaaa')
+        unique_chars = len(set(c for c in query_clean if c.isalpha()))
+        alpha_chars = sum(1 for c in query_clean if c.isalpha())
+
+        if alpha_chars > 0 and unique_chars < self.MIN_UNIQUE_CHARS:
+            reasoning.append(f"Query has only {unique_chars} unique characters")
+            return ThinkSemanticResult(
+                intent_category=IntentCategory.UNCLEAR,
+                confidence=0.9,
+                reasoning_chain=reasoning,
+                should_proceed=False,
+                clarification_needed="I didn't understand your request. Could you please rephrase your question about company research?"
+            )
+
+        # Check 3: Query contains recognizable words
+        has_meaningful_word = False
+
+        # Check for meaningful indicators
+        for word in words:
+            if word in self.MEANINGFUL_INDICATORS:
+                has_meaningful_word = True
+                break
+
+        # Check 4: For single random word queries without context
+        if len(words) == 1 and not has_meaningful_word:
+            # Allow short known words, but flag random gibberish
+            if len(query_clean) >= 4:
+                # Check if all consonants or all vowels (likely gibberish)
+                vowels = set('aeiou')
+                consonants = set('bcdfghjklmnpqrstvwxyz')
+                query_letters = [c for c in query_clean if c.isalpha()]
+
+                if len(query_letters) >= 4:
+                    all_consonants = all(c in consonants for c in query_letters)
+                    all_vowels = all(c in vowels for c in query_letters)
+
+                    if all_consonants or all_vowels:
+                        reasoning.append(f"Query '{query_clean}' appears to be gibberish (unusual letter pattern)")
+                        return ThinkSemanticResult(
+                            intent_category=IntentCategory.UNCLEAR,
+                            confidence=0.85,
+                            reasoning_chain=reasoning,
+                            should_proceed=False,
+                            clarification_needed="I didn't recognize that input. Please ask a question about a company, like 'What is Apple's stock price?' or 'Tell me about Microsoft'."
+                        )
+
+        # Check 5: If no meaningful content detected at all
+        if not has_meaningful_word and len(words) <= 2:
+            # For short queries without any meaningful indicators, ask for clarification
+            if len(words) == 1 and len(query_clean) < 15:
+                reasoning.append("Short query without clear intent or company reference")
+                return ThinkSemanticResult(
+                    intent_category=IntentCategory.UNCLEAR,
+                    confidence=0.7,
+                    reasoning_chain=reasoning,
+                    should_proceed=False,
+                    clarification_needed="Could you please be more specific? Which company or topic would you like to know about?"
+                )
+
+        # Query passed meaningfulness checks
+        reasoning.append("Query passed meaningfulness validation")
+        return ThinkSemanticResult(
+            intent_category=IntentCategory.LEGITIMATE_RESEARCH,
+            confidence=0.6,
             reasoning_chain=reasoning,
             should_proceed=True
         )
@@ -496,7 +596,7 @@ IMPORTANT RULES:
         query: str,
         messages: List,
         state: Dict[str, Any]
-    ) -> Optional[UltraThinkResult]:
+    ) -> Optional[ThinkSemanticResult]:
         """
         Deep LLM-based intent analysis with chain-of-thought reasoning.
         """
@@ -505,9 +605,9 @@ IMPORTANT RULES:
             context = self._build_context(messages, state)
 
             prompt = self._create_prompt(
-                "Analyze this user query with UltraThink methodology:\n\n"
-                "Query: \"{{query}}\"\n\n"
-                "Previous context:\n{{context}}\n\n"
+                "Analyze this user query with ThinkSemantic methodology:\n\n"
+                "Query: \"{query}\"\n\n"
+                "Previous context:\n{context}\n\n"
                 "Think through each step carefully. What is the user's TRUE intent?"
             )
 
@@ -535,7 +635,7 @@ IMPORTANT RULES:
         self,
         query: str,
         state: Dict[str, Any]
-    ) -> UltraThinkResult:
+    ) -> ThinkSemanticResult:
         """
         Fallback pattern-based analysis when LLM fails.
         """
@@ -554,7 +654,7 @@ IMPORTANT RULES:
 
         # Determine if we can proceed
         if not company and not self._is_follow_up(query, state):
-            return UltraThinkResult(
+            return ThinkSemanticResult(
                 intent_category=IntentCategory.UNCLEAR,
                 research_intent=research_intent,
                 confidence=0.5,
@@ -563,7 +663,7 @@ IMPORTANT RULES:
                 clarification_needed="Which company are you asking about? Please specify the company name or ticker symbol."
             )
 
-        return UltraThinkResult(
+        return ThinkSemanticResult(
             intent_category=IntentCategory.LEGITIMATE_RESEARCH,
             research_intent=research_intent,
             confidence=0.7,
@@ -646,8 +746,8 @@ IMPORTANT RULES:
 
         return "\n".join(context_parts) if context_parts else "No previous context"
 
-    def _parse_llm_response(self, response: str) -> Optional[UltraThinkResult]:
-        """Parse LLM JSON response into UltraThinkResult."""
+    def _parse_llm_response(self, response: str) -> Optional[ThinkSemanticResult]:
+        """Parse LLM JSON response into ThinkSemanticResult."""
         try:
             # Extract JSON from response
             json_match = re.search(r'\{[\s\S]*\}', response)
@@ -670,7 +770,7 @@ IMPORTANT RULES:
             except ValueError:
                 research_intent = ResearchIntent.GENERAL
 
-            return UltraThinkResult(
+            return ThinkSemanticResult(
                 intent_category=intent_category,
                 research_intent=research_intent,
                 confidence=data.get("confidence", 0.5),
@@ -689,7 +789,7 @@ IMPORTANT RULES:
     def _build_blocked_response(
         self,
         state: Dict[str, Any],
-        result: UltraThinkResult,
+        result: ThinkSemanticResult,
         start_time: datetime
     ) -> Dict[str, Any]:
         """Build response for blocked queries."""
@@ -719,18 +819,18 @@ IMPORTANT RULES:
         )
 
         return {
-            "ultrathink_complete": True,
+            "thinksemantic_complete": True,
             "intent_category": result.intent_category.value,
             "clarity_status": "blocked",
             "clarification_request": block_message,
             "should_proceed": False,
             "current_agent": self.name,
             "awaiting_human_input": True,
-            "ultrathink_reasoning": result.reasoning_chain,
-            "ultrathink_confidence": result.confidence,
+            "thinksemantic_reasoning": result.reasoning_chain,
+            "thinksemantic_confidence": result.confidence,
             "messages": [Message(
                 role="assistant",
-                content=f"[UltraThink] BLOCKED: {block_message}",
+                content=f"[ThinkSemantic] BLOCKED: {block_message}",
                 agent=self.name,
                 metadata={
                     "intent_category": result.intent_category.value,
@@ -744,13 +844,13 @@ IMPORTANT RULES:
     def _build_response(
         self,
         state: Dict[str, Any],
-        result: UltraThinkResult,
+        result: ThinkSemanticResult,
         start_time: datetime
     ) -> Dict[str, Any]:
         """Build response for analyzed queries."""
         processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
-        self._log_execution("UltraThink analysis complete", {
+        self._log_execution("ThinkSemantic analysis complete", {
             "category": result.intent_category.value,
             "intent": result.research_intent.value if result.research_intent else None,
             "company": result.detected_company,
@@ -760,7 +860,7 @@ IMPORTANT RULES:
         # Handle greeting
         if result.intent_category == IntentCategory.GREETING:
             return {
-                "ultrathink_complete": True,
+                "thinksemantic_complete": True,
                 "intent_category": result.intent_category.value,
                 "clarity_status": "greeting",
                 "should_proceed": False,
@@ -777,7 +877,7 @@ IMPORTANT RULES:
         # Handle unclear queries
         if result.intent_category == IntentCategory.UNCLEAR or result.clarification_needed:
             return {
-                "ultrathink_complete": True,
+                "thinksemantic_complete": True,
                 "intent_category": result.intent_category.value,
                 "research_intent": result.research_intent.value if result.research_intent else None,
                 "clarity_status": "needs_clarification",
@@ -785,11 +885,11 @@ IMPORTANT RULES:
                 "should_proceed": False,
                 "current_agent": self.name,
                 "awaiting_human_input": True,
-                "ultrathink_reasoning": result.reasoning_chain,
-                "ultrathink_confidence": result.confidence,
+                "thinksemantic_reasoning": result.reasoning_chain,
+                "thinksemantic_confidence": result.confidence,
                 "messages": [Message(
                     role="assistant",
-                    content=f"[UltraThink] Clarification needed",
+                    content=f"[ThinkSemantic] Clarification needed",
                     agent=self.name,
                     metadata={
                         "intent_category": result.intent_category.value,
@@ -801,7 +901,7 @@ IMPORTANT RULES:
 
         # Handle legitimate research - PROCEED
         return {
-            "ultrathink_complete": True,
+            "thinksemantic_complete": True,
             "intent_category": result.intent_category.value,
             "query_intent": result.research_intent.value if result.research_intent else "general",
             "detected_company": result.detected_company,
@@ -809,11 +909,11 @@ IMPORTANT RULES:
             "clarity_status": "clear",
             "should_proceed": True,
             "current_agent": self.name,
-            "ultrathink_reasoning": result.reasoning_chain,
-            "ultrathink_confidence": result.confidence,
+            "thinksemantic_reasoning": result.reasoning_chain,
+            "thinksemantic_confidence": result.confidence,
             "messages": [Message(
                 role="assistant",
-                content=f"[UltraThink] Analysis complete: {result.intent_category.value}/{result.research_intent.value if result.research_intent else 'general'} for {result.detected_company or 'unknown company'}",
+                content=f"[ThinkSemantic] Analysis complete: {result.intent_category.value}/{result.research_intent.value if result.research_intent else 'general'} for {result.detected_company or 'unknown company'}",
                 agent=self.name,
                 metadata={
                     "intent_category": result.intent_category.value,

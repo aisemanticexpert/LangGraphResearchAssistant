@@ -1,29 +1,5 @@
 """
-Research Agent for the Research Assistant
-==========================================
-
-The Research Agent is responsible for:
-    1. Gathering comprehensive company information based on query intent
-    2. Computing RAGHEAT-inspired confidence scores
-    3. Building structured research findings
-    4. Routing based on confidence threshold
-
-The query_intent from Clarity Agent determines what data to prioritize:
-    - "leadership": Focus on CEO, executives, management
-    - "stock_price": Focus on stock data, trading info
-    - "financial_analysis": Focus on financial metrics
-    - "news_developments": Focus on recent news
-    - "company_overview": Provide comprehensive overview
-
-Confidence Score Calculation (RAGHEAT-Inspired):
-    Uses weighted factor aggregation: confidence = Σ(wi × fi)
-    where Σwi = 1.0 (guaranteed normalization)
-
-Routing Logic:
-    - confidence_score >= 6.0 -> Synthesis Agent
-    - confidence_score < 6.0 -> Validator Agent
-
-Author: Rajesh Gupta
+Research agent for company data gathering and confidence scoring.
 """
 
 import logging
@@ -96,6 +72,7 @@ class ResearchAgent(BaseAgent):
 
         Args:
             model_name: LLM model to use
+            
             temperature: LLM temperature
             confidence_threshold: Threshold for routing (default 6.0)
         """
@@ -281,8 +258,14 @@ Respond with analysis of the research quality and any concerns."""
         # Determine market regime
         market_regime = self._detect_market_regime(stock_info, factor_data)
 
-        # Determine sources
-        sources = ["mock_data"] if "mock" in str(raw_data.get("source", "")).lower() else ["tavily_api"]
+        # Determine sources - preserve the exact source from research tool
+        raw_source = str(raw_data.get("source", "mock_data")).lower()
+        if "tavily" in raw_source:
+            sources = ["tavily_search"]
+        elif "mock" in raw_source:
+            sources = ["mock_data"]
+        else:
+            sources = [raw_source] if raw_source else ["mock_data"]
 
         # Get sector from additional info
         additional_info = raw_data.get("additional_info", {})

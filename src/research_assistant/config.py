@@ -24,13 +24,13 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
 
     # model stuff
-    default_model: str = "claude-sonnet-4-20250514"
+    default_model: str = "claude-3-haiku-20240307"
     temperature: float = 0.0
 
     # research behavior
     # Priority: Tavily API (if TAVILY_API_KEY is set) > Mock data (fallback)
     # use_mock_data only applies when Tavily API key is NOT configured
-    use_mock_data: bool = True
+    use_mock_data: bool = False
     max_research_attempts: int = 3
     confidence_threshold: float = 6.0  # below this triggers validation
 

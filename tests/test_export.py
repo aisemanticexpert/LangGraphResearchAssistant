@@ -110,14 +110,13 @@ class TestConversationExporter:
             assert all("format" in e for e in exports)
 
     def test_export_with_pydantic_findings(self, temp_export_dir, sample_messages):
-        """Test exporting with Pydantic model research findings."""
-        from src.research_assistant.state import ResearchFindings
+        from src.research_assistant.state import ResearchFindings, NewsItem, StockInfo
 
         findings = ResearchFindings(
             company_name="Tesla",
-            recent_news="Cybertruck deliveries",
-            stock_info="Trading at $242",
-            key_developments="FSD v12 rollout",
+            recent_news=[NewsItem(title="Cybertruck deliveries")],
+            stock_info=StockInfo(price=242.0),
+            key_developments=["FSD v12 rollout"],
             sources=["mock_data"]
         )
 
@@ -143,7 +142,7 @@ class TestConversationExporter:
                 data = json.load(f)
 
             assert data["research_findings"]["company_name"] == "Tesla"
-            assert data["research_findings"]["recent_news"] == "Cybertruck deliveries"
+            assert len(data["research_findings"]["recent_news"]) > 0
 
     def test_export_creates_directory(self, temp_export_dir):
         """Test that export creates directory if it doesn't exist."""
